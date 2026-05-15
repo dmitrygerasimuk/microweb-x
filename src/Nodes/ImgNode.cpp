@@ -29,7 +29,7 @@ void ImageNode::Draw(DrawContext& context, Node* node)
 
 		DrawContext croppedContext = context;
 		croppedContext.Restrict(node->anchor.x, node->anchor.y, node->anchor.x + node->size.x, node->anchor.y + ImageDecoder::Get()->GetLinesDecoded());
-		context.surface->BlitImage(context, &data->image, node->anchor.x, node->anchor.y);
+		croppedContext.surface->BlitImage(croppedContext, &data->image, node->anchor.x, node->anchor.y);
 	}
 	else
 	{
