@@ -6,6 +6,179 @@
 #include "../Platform.h"
 #include "../App.h"
 
+#ifdef __DOS__
+static void CopyMonoBytes(void far* dest, void far* src, unsigned int count);
+#pragma aux CopyMonoBytes = \
+	"push ds" \
+	"mov ds, dx" \
+	"shr cx, 1" \
+	"rep movsw" \
+	"adc cx, cx" \
+	"rep movsb" \
+	"pop ds" \
+	modify [ax cx si di] \
+	parm[es di][dx si][cx];
+
+static void CopyMonoBytesInvert(void far* dest, void far* src, unsigned int count);
+#pragma aux CopyMonoBytesInvert = \
+	"push ds" \
+	"mov ds, dx" \
+	"shr cx, 1" \
+	"jz odd_byte" \
+	"word_loop:" \
+	"lodsw" \
+	"not ax" \
+	"stosw" \
+	"loop word_loop" \
+	"odd_byte:" \
+	"adc cx, cx" \
+	"jz done" \
+	"lodsb" \
+	"not al" \
+	"stosb" \
+	"done:" \
+	"pop ds" \
+	modify [ax cx si di] \
+	parm[es di][dx si][cx];
+#else
+static void CopyMonoBytes(void* dest, void* src, unsigned int count)
+{
+	memcpy(dest, src, count);
+}
+
+static void CopyMonoBytesInvert(void* dest, void* src, unsigned int count)
+{
+	uint8_t* out = (uint8_t*)dest;
+	uint8_t* in = (uint8_t*)src;
+	for (unsigned int i = 0; i < count; i++)
+	{
+		out[i] = in[i] ^ 0xff;
+	}
+}
+#endif
+
+static void BlitMonoBitsSlow(uint8_t* srcBase, uint8_t* destBase, int srcX, int destX, int width, uint8_t invertMask)
+{
+	uint8_t* src = srcBase + (srcX >> 3);
+	uint8_t* dest = destBase + (destX >> 3);
+	uint8_t srcMask = 0x80 >> (srcX & 7);
+	uint8_t destMask = 0x80 >> (destX & 7);
+	uint8_t srcBuffer = (*src++) ^ invertMask;
+	uint8_t destBuffer = *dest;
+
+	for (int i = 0; i < width; i++)
+	{
+		if (srcBuffer & srcMask)
+		{
+			destBuffer |= destMask;
+		}
+		else
+		{
+			destBuffer &= ~destMask;
+		}
+		srcMask >>= 1;
+		if (!srcMask)
+		{
+			srcMask = 0x80;
+			srcBuffer = (*src++) ^ invertMask;
+		}
+		destMask >>= 1;
+		if (!destMask)
+		{
+			*dest++ = destBuffer;
+			destBuffer = *dest;
+			destMask = 0x80;
+		}
+	}
+	if (destMask != 0x80)
+	{
+		*dest = destBuffer;
+	}
+}
+
+static void BlitMonoBits(uint8_t* srcBase, uint8_t* destBase, int srcX, int destX, int width, uint8_t invertMask)
+{
+	int srcBit = srcX & 7;
+	int destBit = destX & 7;
+
+	if (srcBit == destBit)
+	{
+		int bitsLeft = width;
+
+		if (destBit)
+		{
+			int leadingBits = 8 - destBit;
+			if (leadingBits > bitsLeft)
+			{
+				leadingBits = bitsLeft;
+			}
+
+			BlitMonoBitsSlow(srcBase, destBase, srcX, destX, leadingBits, invertMask);
+			srcX += leadingBits;
+			destX += leadingBits;
+			bitsLeft -= leadingBits;
+		}
+
+		unsigned int byteCount = (unsigned int)(bitsLeft >> 3);
+		if (byteCount)
+		{
+			uint8_t* src = srcBase + (srcX >> 3);
+			uint8_t* dest = destBase + (destX >> 3);
+
+			if (invertMask)
+			{
+				CopyMonoBytesInvert(dest, src, byteCount);
+			}
+			else
+			{
+				CopyMonoBytes(dest, src, byteCount);
+			}
+
+			srcX += byteCount << 3;
+			destX += byteCount << 3;
+			bitsLeft -= byteCount << 3;
+		}
+
+		if (bitsLeft)
+		{
+			BlitMonoBitsSlow(srcBase, destBase, srcX, destX, bitsLeft, invertMask);
+		}
+		return;
+	}
+
+	if (srcBit == 0 && width >= 8)
+	{
+		int byteCount = width >> 3;
+		uint8_t* src = srcBase + (srcX >> 3);
+		uint8_t* dest = destBase + (destX >> 3);
+		int shiftRight = destBit;
+		int shiftLeft = 8 - destBit;
+		uint8_t firstMask = (uint8_t)(0xff >> destBit);
+		uint8_t secondMask = (uint8_t)(0xff << (8 - destBit));
+		uint8_t prev = (*src++) ^ invertMask;
+
+		dest[0] = (uint8_t)((dest[0] & ~firstMask) | (prev >> shiftRight));
+
+		for (int i = 1; i < byteCount; i++)
+		{
+			uint8_t current = (*src++) ^ invertMask;
+			dest[i] = (uint8_t)((prev << shiftLeft) | (current >> shiftRight));
+			prev = current;
+		}
+
+		dest[byteCount] = (uint8_t)((dest[byteCount] & ~secondMask) | (prev << shiftLeft));
+
+		int copiedBits = byteCount << 3;
+		if (width > copiedBits)
+		{
+			BlitMonoBitsSlow(srcBase, destBase, srcX + copiedBits, destX + copiedBits, width - copiedBits, invertMask);
+		}
+		return;
+	}
+
+	BlitMonoBitsSlow(srcBase, destBase, srcX, destX, width, invertMask);
+}
+
 DrawSurface_1BPP::DrawSurface_1BPP(int inWidth, int inHeight)
 	: DrawSurface(inWidth, inHeight)
 {
@@ -57,7 +230,7 @@ void DrawSurface_1BPP::HLine(DrawContext& context, int x, int y, int count, uint
 			if (!mask)
 			{
 				*VRAMptr++ = data;
-				while (count > 8)
+				while (count >= 8)
 				{
 					*VRAMptr++ = 0xff;
 					count -= 8;
@@ -81,7 +254,7 @@ void DrawSurface_1BPP::HLine(DrawContext& context, int x, int y, int count, uint
 			if ((x & 7) == 0)
 			{
 				*VRAMptr++ = data;
-				while (count > 8)
+				while (count >= 8)
 				{
 					*VRAMptr++ = 0;
 					count -= 8;
@@ -197,7 +370,7 @@ void DrawSurface_1BPP::FillRect(DrawContext& context, int x, int y, int width, i
 				if (!mask)
 				{
 					*VRAMptr++ = data;
-					while (count > 8)
+					while (count >= 8)
 					{
 						*VRAMptr++ = 0xff;
 						count -= 8;
@@ -221,7 +394,7 @@ void DrawSurface_1BPP::FillRect(DrawContext& context, int x, int y, int width, i
 				if ((workX & 7) == 0)
 				{
 					*VRAMptr++ = data;
-					while (count > 8)
+					while (count >= 8)
 					{
 						*VRAMptr++ = 0;
 						count -= 8;
@@ -470,45 +643,11 @@ void DrawSurface_1BPP::BlitImage(DrawContext& context, Image* image, int x, int 
 	uint8_t invertMask = App::config.invertScreen ? 0xff : 0;
 
 	// Blit the image data line by line
-	MemBlockHandle* imageLines = image->lines.Get<MemBlockHandle*>();
 	for (int j = 0; j < destHeight; j++)
 	{
+		MemBlockHandle* imageLines = image->lines.Get<MemBlockHandle*>();
 		MemBlockHandle imageLine = imageLines[j + srcY];
-		uint8_t* src = imageLine.Get<uint8_t*>() + (srcX >> 3);
-		uint8_t* dest = lines[y + j] + (x >> 3);
-		uint8_t srcMask = 0x80 >> (srcX & 7);
-		uint8_t destMask = 0x80 >> (x & 7);
-		uint8_t srcBuffer = (*src++) ^ invertMask;
-		uint8_t destBuffer = *dest;
-
-		for (int i = 0; i < destWidth; i++)
-		{
-			if (srcBuffer & srcMask)
-			{
-				destBuffer |= destMask;
-			}
-			else
-			{
-				destBuffer &= ~destMask;
-			}
-			srcMask >>= 1;
-			if (!srcMask)
-			{
-				srcMask = 0x80;
-				srcBuffer = (*src++) ^ invertMask;
-			}
-			destMask >>= 1;
-			if (!destMask)
-			{
-				*dest++ = destBuffer;
-				destBuffer = *dest;
-				destMask = 0x80;
-			}
-		}
-		if (destMask != 0x80)
-		{
-			*dest = destBuffer;
-		}
+		BlitMonoBits(imageLine.Get<uint8_t*>(), lines[y + j], srcX, x, destWidth, invertMask);
 	}
 }
 
@@ -557,7 +696,7 @@ void DrawSurface_1BPP::InvertRect(DrawContext& context, int x, int y, int width,
 			if (!mask)
 			{
 				*VRAMptr++ = data;
-				while (count > 8)
+				while (count >= 8)
 				{
 					*VRAMptr++ ^= 0xff;
 					count -= 8;
