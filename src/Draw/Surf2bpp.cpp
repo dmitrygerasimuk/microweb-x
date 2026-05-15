@@ -12,6 +12,7 @@ static uint8_t bitmaskTable[] =
 
 static uint8_t cgaPackLeft[256];
 static uint8_t cgaPackRight[256];
+static uint8_t cgaExpandedPixel[16];
 static bool cgaPackTablesBuilt = false;
 
 static void BuildCgaPackTables()
@@ -23,10 +24,17 @@ static void BuildCgaPackTables()
 
 	for (int n = 0; n < 256; n++)
 	{
-		uint8_t left = (uint8_t)((n >> 4) & 3);
-		uint8_t right = (uint8_t)(n & 3);
-		cgaPackLeft[n] = (uint8_t)((left << 6) | (right << 4));
-		cgaPackRight[n] = (uint8_t)((left << 2) | right);
+		uint8_t left = (uint8_t)(n >> 4);
+		uint8_t right = (uint8_t)(n & 0xf);
+		uint8_t leftExpanded = (uint8_t)(left | (left << 4));
+		uint8_t rightExpanded = (uint8_t)(right | (right << 4));
+
+		cgaPackLeft[n] = (uint8_t)((leftExpanded & 0xc0) | (rightExpanded & 0x30));
+		cgaPackRight[n] = (uint8_t)((leftExpanded & 0x0c) | (rightExpanded & 0x03));
+	}
+	for (int n = 0; n < 16; n++)
+	{
+		cgaExpandedPixel[n] = (uint8_t)(n | (n << 4));
 	}
 
 	cgaPackTablesBuilt = true;
@@ -419,13 +427,13 @@ void DrawSurface_2BPP::BlitImage(DrawContext& context, Image* image, int x, int 
 					{
 						destBuffer = *dest;
 						if (c0 != TRANSPARENT_COLOUR_VALUE)
-							destBuffer = (destBuffer & 0x3f) | ((c0 & 3) << 6);
+							destBuffer = (destBuffer & 0x3f) | (cgaExpandedPixel[c0 & 0xf] & 0xc0);
 						if (c1 != TRANSPARENT_COLOUR_VALUE)
-							destBuffer = (destBuffer & 0xcf) | ((c1 & 3) << 4);
+							destBuffer = (destBuffer & 0xcf) | (cgaExpandedPixel[c1 & 0xf] & 0x30);
 						if (c2 != TRANSPARENT_COLOUR_VALUE)
-							destBuffer = (destBuffer & 0xf3) | ((c2 & 3) << 2);
+							destBuffer = (destBuffer & 0xf3) | (cgaExpandedPixel[c2 & 0xf] & 0x0c);
 						if (c3 != TRANSPARENT_COLOUR_VALUE)
-							destBuffer = (destBuffer & 0xfc) | (c3 & 3);
+							destBuffer = (destBuffer & 0xfc) | (cgaExpandedPixel[c3 & 0xf] & 0x03);
 						*dest++ = destBuffer;
 					}
 
