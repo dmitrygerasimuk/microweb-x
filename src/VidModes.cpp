@@ -10,7 +10,7 @@ VideoModeInfo VideoModeList[] =
 	{ "320x200 4 colours (CGA)",						5,				320,		200,		DrawSurface::Format_2BPP,			120,		70,			DataPack::Lowres,	true,					0xb800,		0xba00							 },
 	{ "320x200 16 colours (Composite CGA)",				4,				320,		200,		DrawSurface::Format_2BPP,			120,		70,			DataPack::CGA,		true,					0xb800,		0xba00							 },
 	{ "640x200 16 colours (EGA)",						0xe,			640,		200,		DrawSurface::Format_4BPP_EGA,		240,		100,		DataPack::CGA,		true,					0xa000,										 },
-	{ "640x350 monochrome (EGA)",						0xf,			640,		350,		DrawSurface::Format_1BPP,			137,		100,		DataPack::EGA,		true,					0xa000,										 },
+	{ "640x350 monochrome (EGA)",						0xf,			640,		350,		DrawSurface::Format_4BPP_EGA,		137,		100,		DataPack::EGA,		true,					0xa000,										 },
 	{ "640x350 16 colours (EGA)",						0x10,			640,		350,		DrawSurface::Format_4BPP_EGA,		137,		100,		DataPack::EGA,		true,					0xa000,										 },
 	{ "640x480 monochrome (VGA)",						0x11,			640,		480,		DrawSurface::Format_1BPP,			100,		100,		DataPack::Default,	true,					0xa000,										 },
 	{ "640x480 16 colours (VGA)",						0x12,			640,		480,		DrawSurface::Format_4BPP_EGA,		100,		100,		DataPack::Default,	true,					0xa000,										 },

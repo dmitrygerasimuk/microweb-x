@@ -123,6 +123,7 @@ Image* DataPack::LoadImageAsset(FILE* fs, DataPackHeader& header, const char* en
 			Platform::FatalError("Could not allocate memory for data pack image %s", entryName);
 		}
 		memcpy(image, asset, sizeof(ImageMetadata));
+		image->hasTransparency = true;
 		uint8_t* data = ((uint8_t*) asset) + sizeof(ImageMetadata);
 		MemBlockHandle* lines = new MemBlockHandle[image->height];
 		if (!lines)

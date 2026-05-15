@@ -20,6 +20,9 @@ public:
 private:
 
 	void ClearDictionary();
+	void BuildPaletteLUT(int colourCount);
+	void BuildColourDitherLUT(int colourCount);
+	void BuildXScaleBuffer();
 	
 	int CalculateLineIndex(int y);
 	void ProcessLineBuffer();
@@ -71,6 +74,7 @@ private:
 	{
 		uint8_t byte;
 		int16_t prev;
+		uint8_t first;
 	};
 
 	struct GraphicControlExtension
@@ -85,12 +89,14 @@ private:
 	
 	uint8_t palette[256*3];			// RGB values
 	uint8_t paletteLUT[256];		// GIF palette colour to video mode palette colour
+	uint8_t colourDitherLUT[16][256];
 	int paletteSize;
 	uint8_t backgroundColour;
 	int transparentColourIndex;
 	uint8_t lzwCodeSize;
 	
 	DictionaryEntry dictionary[GIF_MAX_DICTIONARY_ENTRIES];
+	uint8_t decodeStack[GIF_MAX_DICTIONARY_ENTRIES];
 
 //	union
 	//{
@@ -119,17 +125,23 @@ private:
 			int code;
 			int prev;
 			int dictionaryIndex;
-			int codeBit;
+			uint32_t bitBuffer;
+			int bitCount;
 			
 			int drawX, drawY;
 			int outputLine;
 
 			uint8_t lineBuffer[GIF_LINE_BUFFER_MAX_SIZE];
+			uint16_t xScaleBuffer[GIF_LINE_BUFFER_MAX_SIZE];
 			int lineBufferSize;
+			int scaledLineBufferSize;
 			int linesProcessed;
 			int lineBufferDivider;
 			int lineBufferSkipCount;
 			int lineBufferFlushCount;
+			int useXScaleBuffer;
+			int nextScaledOutputY;
+			int verticalScaleError;
 		};
 		struct
 		{

@@ -146,26 +146,7 @@ void GifDecoder::Process(uint8_t* data, size_t dataLength)
 
 					if(paletteIndex == paletteSize)
 					{
-						if (outputImage->bpp == 8)
-						{
-							for (int n = 0; n < paletteSize; n++)
-							{
-								paletteLUT[n] = Platform::video->paletteLUT[RGB332(palette[n * 3], palette[n * 3 + 1], palette[n * 3 + 2])];
-							}
-						}
-						else
-						{
-							for (int n = 0; n < paletteSize; n++)
-							{
-								paletteLUT[n] = RGB_TO_GREY(palette[n * 3], palette[n * 3 + 1], palette[n * 3 + 2]);
-							}
-						}
-
-						if (transparentColourIndex >= 0)
-						{
-							paletteLUT[transparentColourIndex] = TRANSPARENT_COLOUR_VALUE;
-						}
-
+						BuildPaletteLUT(paletteSize);
 						internalState = ParseDataBlock;
 					}
 				}
@@ -211,6 +192,14 @@ void GifDecoder::Process(uint8_t* data, size_t dataLength)
 					linesProcessed = 0;
 					lineBufferSize = 0;
 					lineBufferFlushCount = 0;
+					lineBufferSkipCount = 0;
+					nextScaledOutputY = 0;
+					verticalScaleError = 0;
+					if (imageDescriptor.x || imageDescriptor.y || imageDescriptor.width != header.width || imageDescriptor.height != header.height)
+					{
+						outputImage->hasTransparency = true;
+					}
+					BuildXScaleBuffer();
 
 					if (imageDescriptor.fields & 0x80)
 					{
@@ -238,26 +227,7 @@ void GifDecoder::Process(uint8_t* data, size_t dataLength)
 
 					if (paletteIndex == localColourTableLength)
 					{
-						if (outputImage->bpp == 8)
-						{
-							for (int n = 0; n < localColourTableLength; n++)
-							{
-								paletteLUT[n] = Platform::video->paletteLUT[RGB332(palette[n * 3], palette[n * 3 + 1], palette[n * 3 + 2])];
-							}
-						}
-						else
-						{
-							for (int n = 0; n < localColourTableLength; n++)
-							{
-								paletteLUT[n] = RGB_TO_GREY(palette[n * 3], palette[n * 3 + 1], palette[n * 3 + 2]);
-							}
-						}
-
-						if (transparentColourIndex >= 0)
-						{
-							paletteLUT[transparentColourIndex] = TRANSPARENT_COLOUR_VALUE;
-						}
-
+						BuildPaletteLUT(localColourTableLength);
 						internalState = ParseLZWCodeSize;
 					}
 				}
@@ -274,7 +244,8 @@ void GifDecoder::Process(uint8_t* data, size_t dataLength)
 				clearCode = 1 << lzwCodeSize;
 				stopCode = clearCode + 1;
 				codeLength = resetCodeLength = lzwCodeSize + 1;
-				codeBit = 0;
+				bitBuffer = 0;
+				bitCount = 0;
 				prev = -1;
 				ClearDictionary();
 
@@ -308,115 +279,111 @@ void GifDecoder::Process(uint8_t* data, size_t dataLength)
 					imageSubBlockSize--;
 					uint8_t dataByte = NextByte(&data, dataLength);
 					//DEBUG_MESSAGE("-Data: %x\n", dataByte);
-					
-					for(int n = 0; n < 8; n++)
+
+					bitBuffer |= ((uint32_t)dataByte << bitCount);
+					bitCount += 8;
+
+					while (bitCount >= codeLength)
 					{
-						if(dataByte & (1 << n))
+						int currentCode = (int)(bitBuffer & ((1 << codeLength) - 1));
+						bitBuffer >>= codeLength;
+						bitCount -= codeLength;
+
+						//DEBUG_MESSAGE("code: %x [len=%d]\n", currentCode, codeLength);
+
+						// Code complete
+						if (currentCode == clearCode)
 						{
-							code |= (1 << codeBit);
+							DEBUG_MESSAGE("CLEAR\n");
+							codeLength = resetCodeLength;
+							ClearDictionary();
+							prev = -1;
+							continue;
 						}
-						codeBit++;
-						
-						if (codeBit == codeLength)
+						else if (currentCode == stopCode)
 						{
-							//DEBUG_MESSAGE("code: %x [len=%d]\n", code, codeLength);
-
-							// Code complete
-							if (code == clearCode)
+							DEBUG_MESSAGE("STOP\n");
+							if (imageSubBlockSize)
 							{
-								DEBUG_MESSAGE("CLEAR\n");
-								codeLength = resetCodeLength;
-								ClearDictionary();
-								prev = -1;
-								codeBit = 0;
-								code = 0;
-								continue;
+								DEBUG_MESSAGE("Malformed GIF\n");
+								// FIXME
+								//state = ImageDecoder::Success;
+								//return;
+								//state = ImageDecoder::Error;
 							}
-							else if (code == stopCode)
+							continue;
+						}
+						if (currentCode >= GIF_MAX_DICTIONARY_ENTRIES)
+						{
+							DEBUG_MESSAGE("Error: code = %x\n", currentCode);
+							state = ImageDecoder::Error;
+							return;
+						}
+
+						if (prev > -1 && dictionaryIndex < GIF_MAX_DICTIONARY_ENTRIES)
+						{
+							if (currentCode > dictionaryIndex)
 							{
-								DEBUG_MESSAGE("STOP\n");
-								if (imageSubBlockSize)
-								{
-									DEBUG_MESSAGE("Malformed GIF\n");
-									// FIXME
-									//state = ImageDecoder::Success;
-									//return;
-									//state = ImageDecoder::Error;
-								}
-								continue;
-							}
-
-							if (prev > -1 && codeLength <= 12)
-							{
-								if (code > dictionaryIndex)
-								{
-									DEBUG_MESSAGE("Error: code = %x, but dictionaryIndex = %x\n", code, dictionaryIndex);
-									state = ImageDecoder::Error;
-									return;
-								}
-
-								int ptr = (code == dictionaryIndex) ? prev : code;
-								while (dictionary[ptr].prev != -1)
-								{
-									ptr = dictionary[ptr].prev;
-								}
-								dictionary[dictionaryIndex].byte = dictionary[ptr].byte;
-								dictionary[dictionaryIndex].prev = prev;
-
-								dictionaryIndex++;
-
-								if(dictionaryIndex == (1 << (codeLength)) && codeLength < 12)
-								{
-									codeLength++;
-									//DEBUG_MESSAGE("Code length: %d\n", codeLength);
-								}
+								DEBUG_MESSAGE("Error: code = %x, but dictionaryIndex = %x\n", currentCode, dictionaryIndex);
+								state = ImageDecoder::Error;
+								return;
 							}
 
-							prev = code;
-							
+							int ptr = (currentCode == dictionaryIndex) ? prev : currentCode;
+							dictionary[dictionaryIndex].byte = dictionary[ptr].first;
+							dictionary[dictionaryIndex].prev = prev;
+							dictionary[dictionaryIndex].first = dictionary[prev].first;
+
+							dictionaryIndex++;
+
+							if(dictionaryIndex == (1 << (codeLength)) && codeLength < 12)
 							{
-								uint8_t stack[1024];
-								int stackSize = 0;
-								
-								while(code != -1)
+								codeLength++;
+								//DEBUG_MESSAGE("Code length: %d\n", codeLength);
+							}
+						}
+
+						prev = currentCode;
+
+						{
+							int stackSize = 0;
+							code = currentCode;
+
+							while(code != -1)
+							{
+								if (stackSize >= GIF_MAX_DICTIONARY_ENTRIES)
 								{
-									if (stackSize >= 1024)
-									{
-										Platform::FatalError("Stack overflow in GIF decoding");
-									}
-
-									stack[stackSize++] = dictionary[code].byte;
-									//DEBUG_MESSAGE(" value: %x\n", dictionary[code].byte);
-
-									code = dictionary[code].prev;
+									Platform::FatalError("Stack overflow in GIF decoding");
 								}
-								
-								while (stackSize)
+
+								decodeStack[stackSize++] = dictionary[code].byte;
+								//DEBUG_MESSAGE(" value: %x\n", dictionary[code].byte);
+
+								code = dictionary[code].prev;
+							}
+
+							while (stackSize)
+							{
+								if (lineBufferSkipCount == lineBufferDivider - 1)
 								{
-									if (lineBufferSkipCount == lineBufferDivider - 1)
-									{
-										lineBuffer[lineBufferSize++] = stack[stackSize - 1];
-										lineBufferSkipCount = 0;
-									}
-									else
-									{
-										lineBufferSkipCount++;
-									}
+									lineBuffer[lineBufferSize++] = decodeStack[stackSize - 1];
+									lineBufferSkipCount = 0;
+								}
+								else
+								{
+									lineBufferSkipCount++;
+								}
 
-									lineBufferFlushCount++;
-									stackSize--;
+								lineBufferFlushCount++;
+								stackSize--;
 
-									if (lineBufferFlushCount == imageDescriptor.width)
-									{
-										ProcessLineBuffer();
-										lineBufferSize = 0;
-										lineBufferFlushCount = 0;
-									}
+								if (lineBufferFlushCount == imageDescriptor.width)
+								{
+									ProcessLineBuffer();
+									lineBufferSize = 0;
+									lineBufferFlushCount = 0;
 								}
 							}
-							
-							codeBit = 0;
-							code = 0;
 						}
 					}
 				}
@@ -462,7 +429,12 @@ void GifDecoder::Process(uint8_t* data, size_t dataLength)
 					if (graphicControlExtension.packedFields & 1)
 					{
 						transparentColourIndex = graphicControlExtension.transparentColourIndex;
+						outputImage->hasTransparency = true;
 						paletteLUT[transparentColourIndex] = TRANSPARENT_COLOUR_VALUE;
+						for (int n = 0; n < 16; n++)
+						{
+							colourDitherLUT[n][transparentColourIndex] = TRANSPARENT_COLOUR_VALUE;
+						}
 					}
 					internalState = ParseExtensionSubBlockSize;
 				}
@@ -501,9 +473,101 @@ void GifDecoder::ClearDictionary()
 	{
 		dictionary[dictionaryIndex].byte = (uint8_t) dictionaryIndex;
 		dictionary[dictionaryIndex].prev = -1;
+		dictionary[dictionaryIndex].first = (uint8_t) dictionaryIndex;
 	}
 	
 	dictionaryIndex += 2;
+}
+
+void GifDecoder::BuildXScaleBuffer()
+{
+	scaledLineBufferSize = imageDescriptor.width / lineBufferDivider;
+	useXScaleBuffer = 0;
+
+	if (scaledLineBufferSize <= 0)
+	{
+		scaledLineBufferSize = 1;
+	}
+
+	if (outputImage->width != scaledLineBufferSize && outputImage->width <= GIF_LINE_BUFFER_MAX_SIZE)
+	{
+		int dy = scaledLineBufferSize << 1;
+		int dx = outputImage->width << 1;
+		int D = dy - outputImage->width;
+		int x = 0;
+
+		for (int i = 0; i < outputImage->width; i++)
+		{
+			xScaleBuffer[i] = (uint16_t)x;
+			while (D > 0)
+			{
+				x++;
+				D -= dx;
+			}
+			D += dy;
+		}
+
+		useXScaleBuffer = 1;
+	}
+}
+
+void GifDecoder::BuildPaletteLUT(int colourCount)
+{
+	if (outputImage->bpp == 8)
+	{
+		for (int n = 0; n < colourCount; n++)
+		{
+			paletteLUT[n] = Platform::video->paletteLUT[RGB332(palette[n * 3], palette[n * 3 + 1], palette[n * 3 + 2])];
+		}
+		BuildColourDitherLUT(colourCount);
+	}
+	else
+	{
+		for (int n = 0; n < colourCount; n++)
+		{
+			paletteLUT[n] = RGB_TO_GREY(palette[n * 3], palette[n * 3 + 1], palette[n * 3 + 2]);
+		}
+	}
+
+	if (transparentColourIndex >= 0)
+	{
+		paletteLUT[transparentColourIndex] = TRANSPARENT_COLOUR_VALUE;
+		for (int n = 0; n < 16; n++)
+		{
+			colourDitherLUT[n][transparentColourIndex] = TRANSPARENT_COLOUR_VALUE;
+		}
+	}
+}
+
+void GifDecoder::BuildColourDitherLUT(int colourCount)
+{
+	uint8_t* videoPaletteLUT = Platform::video->paletteLUT;
+
+	for (int dither = 0; dither < 16; dither++)
+	{
+		int offset = colourDitherMatrix[dither];
+		for (int n = 0; n < colourCount; n++)
+		{
+			int index = n * 3;
+			int red = palette[index] + offset;
+			if (red > 255)
+				red = 255;
+			else if (red < 0)
+				red = 0;
+			int green = palette[index + 1] + offset;
+			if (green > 255)
+				green = 255;
+			else if (green < 0)
+				green = 0;
+			int blue = palette[index + 2] + offset;
+			if (blue > 255)
+				blue = 255;
+			else if (blue < 0)
+				blue = 0;
+
+			colourDitherLUT[dither][n] = videoPaletteLUT[RGB332(red, green, blue)];
+		}
+	}
 }
 
 // Compute output index of y-th input line, in frame of height h. 
@@ -534,26 +598,40 @@ void GifDecoder::ProcessLineBuffer()
 	if (imageDescriptor.fields & GIF_INTERLACE_BIT)
 	{
 		outputY = CalculateLineIndex(linesProcessed);
-	}
 
-	if (outputImage->height == header.height)
+		if (outputImage->height == header.height)
+		{
+			EmitLine(outputY);
+		}
+		else
+		{
+			int first = outputY * (long)outputImage->height / header.height;
+			int last = (outputY + 1) * (long)outputImage->height / header.height;
+
+			for (int y = first; y < last; y++)
+			{
+				EmitLine(y);
+			}
+		}
+	}
+	else if (outputImage->height == header.height)
 	{
 		EmitLine(outputY);
+		linesDecoded = outputY + 1;
 	}
 	else
 	{
-		int first = outputY * (long)outputImage->height / header.height;
-		int last = (outputY + 1) * (long)outputImage->height / header.height;
-
-		for (int y = first; y < last; y++)
+		verticalScaleError += outputImage->height;
+		while (verticalScaleError >= header.height)
 		{
-			EmitLine(y);
+			if (nextScaledOutputY < outputImage->height)
+			{
+				EmitLine(nextScaledOutputY);
+			}
+			nextScaledOutputY++;
+			verticalScaleError -= header.height;
 		}
-
-		if (!(imageDescriptor.fields & GIF_INTERLACE_BIT))
-		{
-			linesDecoded = last;
-		}
+		linesDecoded = nextScaledOutputY;
 	}
 
 	linesProcessed++;
@@ -567,124 +645,74 @@ void GifDecoder::EmitLine(int y)
 	
 	if (outputImage->bpp == 8)
 	{
-		bool useColourDithering = true;
-		if (Platform::video->paletteLUT == compositeCgaPaletteLUT)
+		int ditherRow = (y & 3) << 2;
+		int ditherIndex = 0;
+
+		if (outputImage->width == lineBufferSize)
 		{
-			//useColourDithering = false;
+			uint8_t* lut0 = colourDitherLUT[ditherRow];
+			uint8_t* lut1 = colourDitherLUT[ditherRow + 1];
+			uint8_t* lut2 = colourDitherLUT[ditherRow + 2];
+			uint8_t* lut3 = colourDitherLUT[ditherRow + 3];
+			int i = 0;
+
+			while (i + 3 < lineBufferSize)
+			{
+				output[i] = lut0[lineBuffer[i]];
+				output[i + 1] = lut1[lineBuffer[i + 1]];
+				output[i + 2] = lut2[lineBuffer[i + 2]];
+				output[i + 3] = lut3[lineBuffer[i + 3]];
+				i += 4;
+			}
+
+			while (i < lineBufferSize)
+			{
+				output[i] = colourDitherLUT[ditherRow + ditherIndex][lineBuffer[i]];
+				ditherIndex = (ditherIndex + 1) & 3;
+				i++;
+			}
 		}
-
-		if (useColourDithering)
+		else if (useXScaleBuffer && lineBufferSize == scaledLineBufferSize)
 		{
-			const int8_t* ditherPattern = colourDitherMatrix + 4 * (y & 3);
-			int ditherIndex = 0;
+			uint8_t* lut0 = colourDitherLUT[ditherRow];
+			uint8_t* lut1 = colourDitherLUT[ditherRow + 1];
+			uint8_t* lut2 = colourDitherLUT[ditherRow + 2];
+			uint8_t* lut3 = colourDitherLUT[ditherRow + 3];
+			int i = 0;
 
-			if (outputImage->width == lineBufferSize)
+			while (i + 3 < outputImage->width)
 			{
-				for (int i = 0; i < lineBufferSize; i++)
-				{
-					int8_t offset = ditherPattern[ditherIndex];
-					ditherIndex = (ditherIndex + 1) & 3;
-
-					if (lineBuffer[i] == transparentColourIndex)
-					{
-						output[i] = TRANSPARENT_COLOUR_VALUE;
-						continue;
-					}
-
-					int index = lineBuffer[i] * 3;
-					int red = palette[index] + offset;
-					if (red > 255)
-						red = 255;
-					else if (red < 0)
-						red = 0;
-					int green = palette[index + 1] + offset;
-					if (green > 255)
-						green = 255;
-					else if (green < 0)
-						green = 0;
-					int blue = palette[index + 2] + offset;
-					if (blue > 255)
-						blue = 255;
-					else if (blue < 0)
-						blue = 0;
-
-					output[i] = Platform::video->paletteLUT[RGB332(red, green, blue)];
-				}
-			}
-			else
-			{
-				int dy = lineBufferSize << 1;
-				int dx = outputImage->width << 1;
-				int D = dy - outputImage->width;
-				int x = 0;
-
-				for (int i = 0; i < outputImage->width; i++)
-				{
-					int offset = ditherPattern[ditherIndex];
-					ditherIndex = (ditherIndex + 1) & 3;
-
-					if (lineBuffer[x] == transparentColourIndex)
-					{
-						output[i] = TRANSPARENT_COLOUR_VALUE;
-					}
-					else
-					{
-						int index = lineBuffer[x] * 3;
-						int red = palette[index] + offset;
-						if (red > 255)
-							red = 255;
-						else if (red < 0)
-							red = 0;
-						int green = palette[index + 1] + offset;
-						if (green > 255)
-							green = 255;
-						else if (green < 0)
-							green = 0;
-						int blue = palette[index + 2] + offset;
-						if (blue > 255)
-							blue = 255;
-						else if (blue < 0)
-							blue = 0;
-
-						output[i] = Platform::video->paletteLUT[RGB332(red, green, blue)];
-					}
-
-					while (D > 0)
-					{
-						x++;
-						D -= dx;
-					}
-					D += dy;
-				}
+				output[i] = lut0[lineBuffer[xScaleBuffer[i]]];
+				output[i + 1] = lut1[lineBuffer[xScaleBuffer[i + 1]]];
+				output[i + 2] = lut2[lineBuffer[xScaleBuffer[i + 2]]];
+				output[i + 3] = lut3[lineBuffer[xScaleBuffer[i + 3]]];
+				i += 4;
 			}
 
+			while (i < outputImage->width)
+			{
+				output[i] = colourDitherLUT[ditherRow + (i & 3)][lineBuffer[xScaleBuffer[i]]];
+				i++;
+			}
 		}
 		else
 		{
-			if (outputImage->width == lineBufferSize)
-			{
-				for (int i = 0; i < lineBufferSize; i++)
-				{
-					output[i] = paletteLUT[lineBuffer[i]];
-				}
-			}
-			else
-			{
-				int dy = lineBufferSize << 1;
-				int dx = outputImage->width << 1;
-				int D = dy - outputImage->width;
-				int x = 0;
+			int dy = lineBufferSize << 1;
+			int dx = outputImage->width << 1;
+			int D = dy - outputImage->width;
+			int x = 0;
 
-				for (int i = 0; i < outputImage->width; i++)
+			for (int i = 0; i < outputImage->width; i++)
+			{
+				output[i] = colourDitherLUT[ditherRow + ditherIndex][lineBuffer[x]];
+				ditherIndex = (ditherIndex + 1) & 3;
+
+				while (D > 0)
 				{
-					output[i] = paletteLUT[lineBuffer[x]];
-					while (D > 0)
-					{
-						x++;
-						D -= dx;
-					}
-					D += dy;
+					x++;
+					D -= dx;
 				}
+				D += dy;
 			}
 		}
 	}
@@ -700,6 +728,34 @@ void GifDecoder::EmitLine(int y)
 			for (int i = 0; i < lineBufferSize; i++)
 			{
 				uint8_t value = paletteLUT[lineBuffer[i]];
+				uint8_t threshold = ditherPattern[ditherIndex];
+
+				if (value > threshold)
+				{
+					buffer |= mask;
+				}
+
+				ditherIndex = (ditherIndex + 1) & 15;
+
+				mask >>= 1;
+				if (!mask)
+				{
+					*output++ = buffer;
+					buffer = 0;
+					mask = 0x80;
+				}
+			}
+
+			if (mask != 0x80)
+			{
+				*output = buffer;
+			}
+		}
+		else if (useXScaleBuffer && lineBufferSize == scaledLineBufferSize)
+		{
+			for (int i = 0; i < outputImage->width; i++)
+			{
+				uint8_t value = paletteLUT[lineBuffer[xScaleBuffer[i]]];
 				uint8_t threshold = ditherPattern[ditherIndex];
 
 				if (value > threshold)

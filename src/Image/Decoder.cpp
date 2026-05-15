@@ -186,6 +186,7 @@ void ImageDecoder::Begin(Image* image, bool dimensionsOnly)
     state = ImageDecoder::Decoding;
     outputImage = image;
     outputImage->bpp = Platform::video->drawSurface->format == DrawSurface::Format_1BPP ? 1 : 8;
+    outputImage->hasTransparency = false;
 }
 
 void ImageDecoder::CalculateImageDimensions(int sourceWidth, int sourceHeight)

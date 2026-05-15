@@ -10,11 +10,34 @@ static uint8_t bitmaskTable[] =
 	0xc0, 0x30, 0x0c, 0x03
 };
 
+static uint8_t cgaPackLeft[256];
+static uint8_t cgaPackRight[256];
+static bool cgaPackTablesBuilt = false;
+
+static void BuildCgaPackTables()
+{
+	if (cgaPackTablesBuilt)
+	{
+		return;
+	}
+
+	for (int n = 0; n < 256; n++)
+	{
+		uint8_t left = (uint8_t)((n >> 4) & 3);
+		uint8_t right = (uint8_t)(n & 3);
+		cgaPackLeft[n] = (uint8_t)((left << 6) | (right << 4));
+		cgaPackRight[n] = (uint8_t)((left << 2) | right);
+	}
+
+	cgaPackTablesBuilt = true;
+}
+
 DrawSurface_2BPP::DrawSurface_2BPP(int inWidth, int inHeight)
 	: DrawSurface(inWidth, inHeight)
 {
 	lines = new uint8_t * [height];
 	format = DrawSurface::Format_2BPP;
+	BuildCgaPackTables();
 }
 
 void DrawSurface_2BPP::HLine(DrawContext& context, int x, int y, int count, uint8_t colour)
@@ -349,19 +372,78 @@ void DrawSurface_2BPP::BlitImage(DrawContext& context, Image* image, int x, int 
 
 	if (image->bpp == 8)
 	{
+		MemBlockHandle* imageLines = image->lines.Get<MemBlockHandle*>();
 		for (int j = 0; j < destHeight; j++)
 		{
-			MemBlockHandle* imageLines = image->lines.Get<MemBlockHandle*>();
 			MemBlockHandle imageLine = imageLines[j + srcY];
 			uint8_t* src = imageLine.Get<uint8_t*>() + srcX;
 			uint8_t* dest = lines[y + j] + (x >> 2);
 			uint8_t destMask = bitmaskTable[x & 3];
 			uint8_t destBuffer = *dest;
+			int widthLeft = destWidth;
 
-			for (int i = 0; i < destWidth; i++)
+			if ((x & 3) == 0 && !image->hasTransparency)
+			{
+				while (widthLeft >= 4)
+				{
+					*dest++ = (uint8_t)(cgaPackLeft[((src[0] & 0xf) << 4) | (src[1] & 0xf)] |
+						cgaPackRight[((src[2] & 0xf) << 4) | (src[3] & 0xf)]);
+					src += 4;
+					widthLeft -= 4;
+				}
+
+				destMask = 0xc0;
+				if (widthLeft)
+				{
+					destBuffer = *dest;
+				}
+			}
+			else if ((x & 3) == 0)
+			{
+				while (widthLeft >= 4)
+				{
+					uint8_t c0 = src[0];
+					uint8_t c1 = src[1];
+					uint8_t c2 = src[2];
+					uint8_t c3 = src[3];
+
+					if (c0 != TRANSPARENT_COLOUR_VALUE &&
+						c1 != TRANSPARENT_COLOUR_VALUE &&
+						c2 != TRANSPARENT_COLOUR_VALUE &&
+						c3 != TRANSPARENT_COLOUR_VALUE)
+					{
+						*dest++ = (uint8_t)(cgaPackLeft[((c0 & 0xf) << 4) | (c1 & 0xf)] |
+							cgaPackRight[((c2 & 0xf) << 4) | (c3 & 0xf)]);
+					}
+					else
+					{
+						destBuffer = *dest;
+						if (c0 != TRANSPARENT_COLOUR_VALUE)
+							destBuffer = (destBuffer & 0x3f) | ((c0 & 3) << 6);
+						if (c1 != TRANSPARENT_COLOUR_VALUE)
+							destBuffer = (destBuffer & 0xcf) | ((c1 & 3) << 4);
+						if (c2 != TRANSPARENT_COLOUR_VALUE)
+							destBuffer = (destBuffer & 0xf3) | ((c2 & 3) << 2);
+						if (c3 != TRANSPARENT_COLOUR_VALUE)
+							destBuffer = (destBuffer & 0xfc) | (c3 & 3);
+						*dest++ = destBuffer;
+					}
+
+					src += 4;
+					widthLeft -= 4;
+				}
+
+				destMask = 0xc0;
+				if (widthLeft)
+				{
+					destBuffer = *dest;
+				}
+			}
+
+			for (int i = 0; i < widthLeft; i++)
 			{
 				uint8_t srcBuffer = *src;
-				if (srcBuffer != TRANSPARENT_COLOUR_VALUE)
+				if (!image->hasTransparency || srcBuffer != TRANSPARENT_COLOUR_VALUE)
 				{
 					srcBuffer |= (srcBuffer << 4);
 					destBuffer = (destBuffer & (~destMask)) | ((srcBuffer)&destMask);
@@ -375,14 +457,17 @@ void DrawSurface_2BPP::BlitImage(DrawContext& context, Image* image, int x, int 
 					destMask = 0xc0;
 				}
 			}
-			*dest = destBuffer;
+			if (destMask != 0xc0)
+			{
+				*dest = destBuffer;
+			}
 		}
 	}
 	else if (image->bpp == 1)
 	{
+		MemBlockHandle* imageLines = image->lines.Get<MemBlockHandle*>();
 		for (int j = 0; j < destHeight; j++)
 		{
-			MemBlockHandle* imageLines = image->lines.Get<MemBlockHandle*>();
 			MemBlockHandle imageLine = imageLines[j + srcY];
 			uint8_t* src = imageLine.Get<uint8_t*>() + (srcX >> 3);
 			uint8_t* dest = lines[y + j] + (x >> 2);

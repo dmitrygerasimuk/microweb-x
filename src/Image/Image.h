@@ -19,9 +19,11 @@ struct Image : ImageMetadata
 	{
 		width = height = pitch = sourceWidth = sourceHeight = 0;
 		bpp = 0;
+		hasTransparency = false;
 	}
 	MemBlockHandle lines;
 	uint16_t sourceWidth, sourceHeight;
+	bool hasTransparency;
 };
 
 #endif

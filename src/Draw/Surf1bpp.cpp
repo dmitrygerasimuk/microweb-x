@@ -470,9 +470,9 @@ void DrawSurface_1BPP::BlitImage(DrawContext& context, Image* image, int x, int 
 	uint8_t invertMask = App::config.invertScreen ? 0xff : 0;
 
 	// Blit the image data line by line
+	MemBlockHandle* imageLines = image->lines.Get<MemBlockHandle*>();
 	for (int j = 0; j < destHeight; j++)
 	{
-		MemBlockHandle* imageLines = image->lines.Get<MemBlockHandle*>();
 		MemBlockHandle imageLine = imageLines[j + srcY];
 		uint8_t* src = imageLine.Get<uint8_t*>() + (srcX >> 3);
 		uint8_t* dest = lines[y + j] + (x >> 3);
@@ -505,7 +505,10 @@ void DrawSurface_1BPP::BlitImage(DrawContext& context, Image* image, int x, int 
 				destMask = 0x80;
 			}
 		}
-		*dest = destBuffer;
+		if (destMask != 0x80)
+		{
+			*dest = destBuffer;
+		}
 	}
 }
 
