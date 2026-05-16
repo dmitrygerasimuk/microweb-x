@@ -27,17 +27,25 @@
 void DOSInputDriver::Init()
 {
 	union REGS inreg, outreg;
+	bool forceSoftwareMouse = Platform::video->drawSurface->format == DrawSurface::Format_2BPP;
+
+	hasMouse = false;
+	useMouseDriverCursor = false;
+	currentCursor = MouseCursor::Hand;
+	mouseHideCount = 1;
+	mouseVisible = false;
+	lastMouseX = -1;
+	lastMouseY = -1;
+	queuedPressX = -1;
+	queuedPressY = -1;
+
 	inreg.x.ax = 0;
 	int86(0x33, &inreg, &outreg);
 	hasMouse = (outreg.x.ax == 0xffff);
 
-	currentCursor = MouseCursor::Hand;
+	useMouseDriverCursor = Platform::video->GetVideoModeInfo()->useMouseDriverCursor
+		&& !forceSoftwareMouse;
 	SetMouseCursor(MouseCursor::Pointer);
-	mouseHideCount = 1;
-
-	useMouseDriverCursor = Platform::video->GetVideoModeInfo()->useMouseDriverCursor;
-	queuedPressX = -1;
-	queuedPressY = -1;
 
 	// Set Horizontal Range
 	int horizontalRange = Platform::video->screenWidth;
@@ -172,13 +180,19 @@ void DOSInputDriver::HideMouse()
 	lastMouseX = -1;
 }
 
-static void SetMouseCursorASM(unsigned short far* data, uint16_t hotSpotX, uint16_t hotSpotY);
-#pragma aux SetMouseCursorASM = \
-	"mov ax, 9" \
-	"int 0x33" \
-	modify [ax] \
-	parm [es dx] [bx] [cx] 
+static void SetMouseCursorDriverShape(unsigned short far* data, uint16_t hotSpotX, uint16_t hotSpotY)
+{
+	union REGS inreg, outreg;
+	struct SREGS sreg;
 
+	segread(&sreg);
+	inreg.x.ax = 9;
+	inreg.x.bx = hotSpotX;
+	inreg.x.cx = hotSpotY;
+	inreg.x.dx = FP_OFF(data);
+	sreg.es = FP_SEG(data);
+	int86x(0x33, &inreg, &outreg, &sreg);
+}
 
 void DOSInputDriver::SetMouseCursor(MouseCursor::Type type)
 {
@@ -192,7 +206,7 @@ void DOSInputDriver::SetMouseCursor(MouseCursor::Type type)
 	MouseCursorData* cursor = Assets.GetMouseCursorData(type);
 	if (cursor && useMouseDriverCursor)
 	{
-		SetMouseCursorASM(cursor->data, cursor->hotSpotX, cursor->hotSpotY);
+		SetMouseCursorDriverShape(cursor->data, cursor->hotSpotX, cursor->hotSpotY);
 	}
 
 	currentCursor = type;

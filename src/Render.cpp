@@ -591,6 +591,11 @@ void PageRenderer::MarkPageLayoutComplete()
 
 void PageRenderer::InvertNode(Node* node)
 {
+	if (!node || !node->isLayoutComplete || IsInRenderQueue(node))
+	{
+		return;
+	}
+
 	Platform::input->HideMouse();
 	Rect& windowRect = app.ui.windowRect;
 	DrawContext invertContext;

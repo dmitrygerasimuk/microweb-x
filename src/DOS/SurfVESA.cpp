@@ -470,6 +470,11 @@ static uint8_t grab[16] =
 
 void DrawSurface_8BPP_VESA::DrawScrollWidgetPart(uint8_t* pixels, int x, int y)
 {
+	if (y < 0 || y >= height || x < 0 || x + 16 > width)
+	{
+		return;
+	}
+
 	VESAPtr ptr = VESAlines[y] + x;
 
 	if (ptr.offset <= (65536L - 16))
@@ -490,14 +495,33 @@ void DrawSurface_8BPP_VESA::VerticalScrollBar(DrawContext& context, int x, int y
 {
 	x += context.drawOffsetX;
 	y += context.drawOffsetY;
-	int startY = y;
 
 	const int grabSize = 7;
 	const int minWidgetSize = grabSize + 4;
+	if (height <= 0)
+	{
+		return;
+	}
+	if (size < minWidgetSize)
+	{
+		size = minWidgetSize;
+	}
+	if (size > height)
+	{
+		size = height;
+	}
+	if (position < 0)
+	{
+		position = 0;
+	}
+	if (position > height - size)
+	{
+		position = height - size;
+	}
+
 	const int widgetPaddingSize = size - minWidgetSize;
 	int topPaddingSize = widgetPaddingSize >> 1;
 	int bottomPaddingSize = widgetPaddingSize - topPaddingSize;
-	const uint16_t edge = 0;
 	int bottomSpacing = height - position - size;
 
 	while (position--)

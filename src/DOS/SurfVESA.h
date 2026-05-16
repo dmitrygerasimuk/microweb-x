@@ -10,7 +10,7 @@ static void SetVESABank(uint16_t bank);
 	"xor bx, bx" \
 	"mov ax, 0x4f05" \
 	"int 0x10" \
-	modify [ax bx] \
+	modify [ax bx cx dx es si di] \
 	parm [dx] 
 
 

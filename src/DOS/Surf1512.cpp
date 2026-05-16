@@ -62,7 +62,7 @@ void DrawSurface_4BPP_PC1512::HLine(DrawContext& context, int x, int y, int coun
 	{
 		count = context.clipRight - x;
 	}
-	if (count < 0)
+	if (count <= 0)
 	{
 		return;
 	}

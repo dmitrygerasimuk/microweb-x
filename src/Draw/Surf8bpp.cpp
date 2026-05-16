@@ -31,7 +31,7 @@ void DrawSurface_8BPP::HLine(DrawContext& context, int x, int y, int count, uint
 	{
 		count = context.clipRight - x;
 	}
-	if (count < 0)
+	if (count <= 0)
 	{
 		return;
 	}

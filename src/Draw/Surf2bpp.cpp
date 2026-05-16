@@ -4,6 +4,7 @@
 #include "../Image/Image.h"
 #include "../Memory/MemBlock.h"
 #include "../Colour.h"
+#include "../Cursor.h"
 
 static uint8_t bitmaskTable[] =
 {
@@ -14,6 +15,23 @@ static uint8_t cgaPackLeft[256];
 static uint8_t cgaPackRight[256];
 static uint8_t cgaExpandedPixel[16];
 static bool cgaPackTablesBuilt = false;
+
+static uint8_t PackCgaColour(uint8_t colour)
+{
+	colour &= 0xf;
+	return (uint8_t)(colour | (colour << 4));
+}
+
+static uint8_t ExpandCgaColour(uint8_t colour)
+{
+	if (colour <= 3)
+	{
+		colour = (uint8_t)(colour * 5);
+	}
+	return PackCgaColour(colour);
+}
+
+static void SetCgaPixel(uint8_t* line, int x, uint8_t colour);
 
 static void BuildCgaPackTables()
 {
@@ -26,15 +44,15 @@ static void BuildCgaPackTables()
 	{
 		uint8_t left = (uint8_t)(n >> 4);
 		uint8_t right = (uint8_t)(n & 0xf);
-		uint8_t leftExpanded = (uint8_t)(left | (left << 4));
-		uint8_t rightExpanded = (uint8_t)(right | (right << 4));
+		uint8_t leftExpanded = PackCgaColour(left);
+		uint8_t rightExpanded = PackCgaColour(right);
 
 		cgaPackLeft[n] = (uint8_t)((leftExpanded & 0xc0) | (rightExpanded & 0x30));
 		cgaPackRight[n] = (uint8_t)((leftExpanded & 0x0c) | (rightExpanded & 0x03));
 	}
 	for (int n = 0; n < 16; n++)
 	{
-		cgaExpandedPixel[n] = (uint8_t)(n | (n << 4));
+		cgaExpandedPixel[n] = PackCgaColour((uint8_t)n);
 	}
 
 	cgaPackTablesBuilt = true;
@@ -45,6 +63,7 @@ DrawSurface_2BPP::DrawSurface_2BPP(int inWidth, int inHeight)
 {
 	lines = new uint8_t * [height];
 	format = DrawSurface::Format_2BPP;
+	cursorBufferX = -1;
 	BuildCgaPackTables();
 }
 
@@ -66,12 +85,12 @@ void DrawSurface_2BPP::HLine(DrawContext& context, int x, int y, int count, uint
 	{
 		count = context.clipRight - x;
 	}
-	if (count < 0)
+	if (count <= 0)
 	{
 		return;
 	}
 
-	colour |= (colour << 4);
+	colour = ExpandCgaColour(colour);
 
 	uint8_t* VRAMptr = lines[y];
 	VRAMptr += (x >> 2);
@@ -82,22 +101,27 @@ void DrawSurface_2BPP::HLine(DrawContext& context, int x, int y, int count, uint
 	while (count--)
 	{
 		data = (data & (~mask)) | (colour & mask);
-		x++;
 		mask >>= 2;
 		if (!mask)
 		{
 			*VRAMptr++ = data;
-			while (count > 4)
+			while (count >= 4)
 			{
 				*VRAMptr++ = colour;
 				count -= 4;
 			}
-			mask = 0xc0;
-			data = *VRAMptr;
+			if (count > 0)
+			{
+				mask = 0xc0;
+				data = *VRAMptr;
+			}
 		}
 	}
 
-	*VRAMptr = data;
+	if (mask)
+	{
+		*VRAMptr = data;
+	}
 }
 
 void DrawSurface_2BPP::VLine(DrawContext& context, int x, int y, int count, uint8_t colour)
@@ -127,7 +151,7 @@ void DrawSurface_2BPP::VLine(DrawContext& context, int x, int y, int count, uint
 		return;
 	}
 
-	colour |= (colour << 4);
+	colour = ExpandCgaColour(colour);
 
 	uint8_t mask = bitmaskTable[x & 3];
 	uint8_t andMask = ~mask;
@@ -169,7 +193,7 @@ void DrawSurface_2BPP::FillRect(DrawContext& context, int x, int y, int width, i
 		return;
 	}
 
-	colour |= (colour << 4);
+	colour = ExpandCgaColour(colour);
 
 	while (height)
 	{
@@ -187,17 +211,23 @@ void DrawSurface_2BPP::FillRect(DrawContext& context, int x, int y, int width, i
 			if (!mask)
 			{
 				*VRAMptr++ = data;
-				while (count > 4)
+				while (count >= 4)
 				{
 					*VRAMptr++ = colour;
 					count -= 4;
 				}
-				mask = 0xc0;
-				data = *VRAMptr;
+				if (count > 0)
+				{
+					mask = 0xc0;
+					data = *VRAMptr;
+				}
 			}
 		}
 
-		*VRAMptr = data;
+		if (mask)
+		{
+			*VRAMptr = data;
+		}
 
 		height--;
 		y++;
@@ -229,7 +259,7 @@ void DrawSurface_2BPP::DrawString(DrawContext& context, Font* font, const char* 
 		return;
 	}
 
-	colour |= (colour << 4);
+	colour = ExpandCgaColour(colour);
 
 	uint8_t firstLine = 0;
 	if (y < context.clipTop)
@@ -281,14 +311,11 @@ void DrawSurface_2BPP::DrawString(DrawContext& context, Font* font, const char* 
 
 		for (uint8_t j = glyphTop; j <= glyphBottom; j++)
 		{
-			uint8_t* VRAMptr = lines[outY] + (x >> 2);
-			uint8_t writeData = *VRAMptr;
-			uint8_t writeMask = bitmaskTable[x & 3];
-			uint8_t writeOffset = (uint8_t)(x) & 0x7;
+			int rowX = x;
 
 			if ((style & FontStyle::Italic) && j < (font->glyphHeight >> 1))
 			{
-				writeOffset++;
+				rowX++;
 			}
 
 			for (uint8_t i = 0; i < glyphWidthBytes; i++)
@@ -297,22 +324,24 @@ void DrawSurface_2BPP::DrawString(DrawContext& context, Font* font, const char* 
 
 				for (uint8_t k = 0; k < 8; k++)
 				{
-					if (glyphPixels & (0x80 >> k))
+					int glyphX = (i << 3) + k;
+					if (glyphX >= glyphWidth)
 					{
-						writeData = (writeData & (~writeMask)) | (writeMask & colour);
+						break;
 					}
 
-					writeMask >>= 2;
-					if (!writeMask)
+					int outX = rowX + glyphX;
+					if (outX >= context.clipRight)
 					{
-						*VRAMptr++ = writeData;
-						writeData = *VRAMptr;
-						writeMask = 0xc0;
+						break;
+					}
+
+					if (outX >= context.clipLeft && (glyphPixels & (0x80 >> k)))
+					{
+						SetCgaPixel(lines[outY], outX, colour);
 					}
 				}
 			}
-
-			*VRAMptr = writeData;
 
 			outY++;
 		}
@@ -453,7 +482,7 @@ void DrawSurface_2BPP::BlitImage(DrawContext& context, Image* image, int x, int 
 				uint8_t srcBuffer = *src;
 				if (!image->hasTransparency || srcBuffer != TRANSPARENT_COLOUR_VALUE)
 				{
-					srcBuffer |= (srcBuffer << 4);
+					srcBuffer = PackCgaColour(srcBuffer);
 					destBuffer = (destBuffer & (~destMask)) | ((srcBuffer)&destMask);
 				}
 				src++;
@@ -461,8 +490,11 @@ void DrawSurface_2BPP::BlitImage(DrawContext& context, Image* image, int x, int 
 				if (!destMask)
 				{
 					*dest++ = destBuffer;
-					destBuffer = *dest;
 					destMask = 0xc0;
+					if (i + 1 < widthLeft)
+					{
+						destBuffer = *dest;
+					}
 				}
 			}
 			if (destMask != 0xc0)
@@ -505,11 +537,17 @@ void DrawSurface_2BPP::BlitImage(DrawContext& context, Image* image, int x, int 
 				if (!destMask)
 				{
 					*dest++ = destBuffer;
-					destBuffer = *dest;
 					destMask = 0xc0;
+					if (i + 1 < destWidth)
+					{
+						destBuffer = *dest;
+					}
 				}
 			}
-			*dest = destBuffer;
+			if (destMask != 0xc0)
+			{
+				*dest = destBuffer;
+			}
 		}
 	}
 }
@@ -558,98 +596,102 @@ void DrawSurface_2BPP::InvertRect(DrawContext& context, int x, int y, int width,
 			if (!mask)
 			{
 				*VRAMptr++ = data;
-				while (count > 4)
+				while (count >= 4)
 				{
 					*VRAMptr++ ^= 0xff;
 					count -= 4;
 				}
-				mask = 0xc0;
-				data = *VRAMptr;
+				if (count > 0)
+				{
+					mask = 0xc0;
+					data = *VRAMptr;
+				}
 			}
 		}
 
-		*VRAMptr = data;
+		if (mask)
+		{
+			*VRAMptr = data;
+		}
 
 		height--;
 		y++;
 	}
 }
 
+static void DrawCgaScrollPattern(DrawSurface_2BPP* surface, DrawContext& context, int x, int y, const uint8_t* pattern)
+{
+	int drawX = x + context.drawOffsetX;
+	int drawY = y + context.drawOffsetY;
+
+	if (drawY < context.clipTop || drawY >= context.clipBottom)
+	{
+		return;
+	}
+
+	if ((drawX & 3) == 0 && drawX >= context.clipLeft && drawX + 16 <= context.clipRight)
+	{
+		memcpy(surface->lines[drawY] + (drawX >> 2), pattern, 4);
+		return;
+	}
+
+	for (int col = 0; col < 16; col++)
+	{
+		uint8_t packed = pattern[col >> 2];
+		uint8_t colour = (uint8_t)(((packed >> (6 - ((col & 3) << 1))) & 3) * 5);
+		surface->HLine(context, x + col, y, 1, colour);
+	}
+}
+
 void DrawSurface_2BPP::VerticalScrollBar(DrawContext& context, int x, int y, int height, int position, int size)
 {
-#if 1
-	const uint16_t edge = 0;
-	const uint16_t inner1 = 0xff3f;
-	const uint16_t inner2 = 0xfcff;
-	const uint16_t widgetEdge1 = 0x003f;
-	const uint16_t widgetEdge2 = 0xfc00;
-	const uint16_t widgetInner1 = 0xff3c;
-	const uint16_t widgetInner2 = 0x3cff;
-	const uint16_t grab1 = 0xc03c;
-	const uint16_t grab2 = 0x3c03;
+	if (height <= 0)
+	{
+		return;
+	}
+	if (size < 1)
+	{
+		size = 1;
+	}
+	if (size > height)
+	{
+		size = height;
+	}
+	if (position < 0)
+	{
+		position = 0;
+	}
+	if (position > height - size)
+	{
+		position = height - size;
+	}
 
-	x += context.drawOffsetX;
-	y += context.drawOffsetY;
-	int startY = y;
-
-	x >>= 2;
+	static const uint8_t inner[4] = { 0x3f, 0xff, 0xff, 0xfc };
+	static const uint8_t widgetEdge[4] = { 0x3f, 0x00, 0x00, 0xfc };
+	static const uint8_t widgetInner[4] = { 0x3c, 0xff, 0xff, 0x3c };
+	static const uint8_t grab[4] = { 0x3c, 0xc0, 0x03, 0x3c };
 	const int grabSize = 7;
-	const int minWidgetSize = grabSize + 4;
-	const int widgetPaddingSize = size - minWidgetSize;
-	int topPaddingSize = widgetPaddingSize >> 1;
-	int bottomPaddingSize = widgetPaddingSize - topPaddingSize;
-	int bottomSpacing = height - position - size;
 
-	while (position--)
+	int widgetTop = position;
+	int widgetBottom = position + size;
+	int grabTop = widgetTop + ((size - grabSize) >> 1);
+	int grabBottom = grabTop + grabSize;
+
+	for (int row = 0; row < height; row++)
 	{
-		((uint16_t*)(&lines[y][x]))[0] = inner1;
-		((uint16_t*)(&lines[y++][x]))[1] = inner2;
+		const uint8_t* pattern = inner;
+
+		if (row == widgetTop || row == widgetBottom - 1)
+		{
+			pattern = widgetEdge;
+		}
+		else if (row > widgetTop && row < widgetBottom - 1)
+		{
+			pattern = (row >= grabTop && row < grabBottom && ((row - grabTop) & 1)) ? grab : widgetInner;
+		}
+
+		DrawCgaScrollPattern(this, context, x, y + row, pattern);
 	}
-
-	((uint16_t*)(&lines[y][x]))[0] = inner1;
-	((uint16_t*)(&lines[y++][x]))[1] = inner2;
-	((uint16_t*)(&lines[y][x]))[0] = widgetEdge1;
-	((uint16_t*)(&lines[y++][x]))[1] = widgetEdge2;
-
-
-	while (topPaddingSize--)
-	{
-		((uint16_t*)(&lines[y][x]))[0] = widgetInner1;
-		((uint16_t*)(&lines[y++][x]))[1] = widgetInner2;
-	}
-
-	((uint16_t*)(&lines[y][x]))[0] = widgetInner1;
-	((uint16_t*)(&lines[y++][x]))[1] = widgetInner2;
-	((uint16_t*)(&lines[y][x]))[0] = grab1;
-	((uint16_t*)(&lines[y++][x]))[1] = grab2;
-	((uint16_t*)(&lines[y][x]))[0] = widgetInner1;
-	((uint16_t*)(&lines[y++][x]))[1] = widgetInner2;
-	((uint16_t*)(&lines[y][x]))[0] = grab1;
-	((uint16_t*)(&lines[y++][x]))[1] = grab2;
-	((uint16_t*)(&lines[y][x]))[0] = widgetInner1;
-	((uint16_t*)(&lines[y++][x]))[1] = widgetInner2;
-	((uint16_t*)(&lines[y][x]))[0] = grab1;
-	((uint16_t*)(&lines[y++][x]))[1] = grab2;
-	((uint16_t*)(&lines[y][x]))[0] = widgetInner1;
-	((uint16_t*)(&lines[y++][x]))[1] = widgetInner2;
-
-	while (bottomPaddingSize--)
-	{
-		((uint16_t*)(&lines[y][x]))[0] = widgetInner1;
-		((uint16_t*)(&lines[y++][x]))[1] = widgetInner2;
-	}
-
-	((uint16_t*)(&lines[y][x]))[0] = widgetEdge1;
-	((uint16_t*)(&lines[y++][x]))[1] = widgetEdge2;
-	((uint16_t*)(&lines[y][x]))[0] = inner1;
-	((uint16_t*)(&lines[y++][x]))[1] = inner2;
-
-	while (bottomSpacing--)
-	{
-		((uint16_t*)(&lines[y][x]))[0] = inner1;
-		((uint16_t*)(&lines[y++][x]))[1] = inner2;
-	}
-#endif
 }
 
 void DrawSurface_2BPP::Clear()
@@ -665,9 +707,37 @@ void DrawSurface_2BPP::Clear()
 void DrawSurface_2BPP::ScrollScreen(int top, int bottom, int width, int amount)
 {
 	width >>= 2;
+	if (width <= 0 || amount == 0)
+	{
+		return;
+	}
+	if (width > (this->width >> 2))
+	{
+		width = this->width >> 2;
+	}
+	if (top < 0)
+	{
+		top = 0;
+	}
+	if (bottom > height)
+	{
+		bottom = height;
+	}
+	if (top >= bottom)
+	{
+		return;
+	}
 
 	if (amount > 0)
 	{
+		if (top + amount >= height)
+		{
+			return;
+		}
+		if (bottom + amount > height)
+		{
+			bottom = height - amount;
+		}
 		for (int y = top; y < bottom; y++)
 		{
 			memcpy(lines[y], lines[y + amount], width);
@@ -675,9 +745,109 @@ void DrawSurface_2BPP::ScrollScreen(int top, int bottom, int width, int amount)
 	}
 	else if (amount < 0)
 	{
+		if (bottom + amount <= 0)
+		{
+			return;
+		}
+		if (top + amount < 0)
+		{
+			top = -amount;
+		}
 		for (int y = bottom - 1; y >= top; y--)
 		{
 			memcpy(lines[y], lines[y + amount], width);
 		}
 	}
+}
+
+static void SetCgaPixel(uint8_t* line, int x, uint8_t colour)
+{
+	uint8_t mask = bitmaskTable[x & 3];
+	uint8_t packedColour = ExpandCgaColour(colour);
+	uint8_t* pixel = line + (x >> 2);
+	*pixel = (uint8_t)((*pixel & ~mask) | (packedColour & mask));
+}
+
+void DrawSurface_2BPP::DrawCursor(struct MouseCursorData* cursor, int x, int y)
+{
+	if (!cursor)
+	{
+		return;
+	}
+
+	HideCursor();
+
+	x -= cursor->hotSpotX;
+	y -= cursor->hotSpotY;
+
+	int widthBytes = width >> 2;
+	cursorBufferX = x >> 2;
+	if (cursorBufferX < 0)
+	{
+		cursorBufferX = 0;
+	}
+	if (cursorBufferX > widthBytes - 5)
+	{
+		cursorBufferX = widthBytes - 5;
+	}
+
+	cursorBufferY = y;
+	if (cursorBufferY < 0)
+	{
+		cursorBufferY = 0;
+	}
+	if (cursorBufferY > height - 16)
+	{
+		cursorBufferY = height - 16;
+	}
+
+	uint8_t* bufferPtr = cursorBuffer;
+	for (int row = 0; row < 16; row++)
+	{
+		memcpy(bufferPtr, lines[cursorBufferY + row] + cursorBufferX, 5);
+		bufferPtr += 5;
+	}
+
+	for (int row = 0; row < 16; row++)
+	{
+		int outY = y + row;
+		if (outY < 0 || outY >= height)
+		{
+			continue;
+		}
+
+		uint16_t cursorMask = cursor->data[row];
+		uint16_t cursorColour = cursor->data[16 + row];
+		uint16_t bit = 0x8000;
+
+		for (int col = 0; col < 16; col++, bit >>= 1)
+		{
+			int outX = x + col;
+			if (outX < 0 || outX >= width)
+			{
+				continue;
+			}
+			if (!(cursorMask & bit))
+			{
+				SetCgaPixel(lines[outY], outX, (cursorColour & bit) ? 3 : 0);
+			}
+		}
+	}
+}
+
+void DrawSurface_2BPP::HideCursor()
+{
+	if (cursorBufferX < 0)
+	{
+		return;
+	}
+
+	uint8_t* bufferPtr = cursorBuffer;
+	for (int row = 0; row < 16; row++)
+	{
+		memcpy(lines[cursorBufferY + row] + cursorBufferX, bufferPtr, 5);
+		bufferPtr += 5;
+	}
+
+	cursorBufferX = -1;
 }
