@@ -23,12 +23,13 @@ public:
 		return top->obj;
 	}
 
-	void Push()
+	bool Push()
 	{
 		if (top->next)
 		{
 			top->next->obj = top->obj;
 			top = top->next;
+			return true;
 		}
 		else
 		{
@@ -40,11 +41,13 @@ public:
 				newEntry->next = nullptr;
 				newEntry->obj = top->obj;
 				top = newEntry;
+				return true;
 			}
 			else
 			{
 				// TODO: handle allocation error more gracefully
 				//Platform::FatalError("Could not push to stack: out of memory");
+				return false;
 			}
 		}
 	}

@@ -10,7 +10,13 @@
 class XMSManager
 {
 public:
-	XMSManager() : isAvailable(false) {}
+	XMSManager()
+		: isAvailable(false)
+		, totalAllocated(0)
+		, totalUsed(0)
+		, buffer(0)
+		, allocationHandle(0)
+	{}
 
 	void Init();
 	void Reset();

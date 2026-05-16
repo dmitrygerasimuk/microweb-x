@@ -1,6 +1,9 @@
 #include <string.h>
 #include <malloc.h>
+#include <stdarg.h>
+#include <stdio.h>
 #include "Memory.h"
+#include "MemoryLog.h"
 #ifdef _DOS
 #include <dos.h>
 #include "../DOS/EMS.h"
@@ -25,6 +28,29 @@ unsigned int GetMemFreeKB(void);
 LinearAllocator MemoryManager::pageAllocator;
 MallocWrapper MemoryManager::interfaceAllocator;
 MemBlockAllocator MemoryManager::pageBlockAllocator;
+
+#if MEMORY_DEBUG_LOG
+void MemoryDebugLog(const char* fmt, ...)
+{
+	FILE* file = fopen("C:\\MEMLOG.TXT", "a");
+	if (!file)
+	{
+		file = fopen("MEMLOG.TXT", "a");
+	}
+	if (!file)
+	{
+		return;
+	}
+
+	va_list ap;
+	va_start(ap, fmt);
+	vfprintf(file, fmt, ap);
+	va_end(ap);
+
+	fprintf(file, "\n");
+	fclose(file);
+}
+#endif
 
 void MemoryManager::GenerateMemoryReport(char* outString)
 {

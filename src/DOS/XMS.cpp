@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "../Memory/MemoryLog.h"
 
 #pragma pack(1)
 typedef union 
@@ -39,7 +40,7 @@ extern uint16_t XMSTransferCall(void);
     "call dword ptr es:[bx]" \
     "pop ds" \
     value [ax] \
-    modify [ax bx es si];
+    modify [ax bx cx dx es si di];
 
 // Returns the handle (DX) or 0 on failure
 extern uint16_t XMSAllocate(uint16_t kb);
@@ -53,7 +54,7 @@ extern uint16_t XMSAllocate(uint16_t kb);
     "success:"        \
     parm [dx]         \
     value [dx]        /* Return handle in DX */ \
-    modify [ax dx];   
+    modify [ax bx dx];
 
 extern void XMSFree(uint16_t handle);
 
@@ -64,7 +65,7 @@ extern void XMSFree(uint16_t handle);
     "call dword ptr [XMSEntry]" \
     "skip:"           \
     parm [dx]         \
-    modify [ax];      /* Driver returns result in AX, we ignore it */
+    modify [ax bx dx];      /* Driver returns result in AX, we ignore it */
 
 // Returns the largest contiguous XMS block available (in KB)
 extern uint16_t XMSGetLargestFree(void);
@@ -75,13 +76,15 @@ extern uint16_t XMSGetLargestFree(void);
     /* AX now contains largest block in KB */ \
     /* DX contains total free XMS in KB (ignored here) */ \
     value [ax]        \
-    modify [ax dx];
+    modify [ax bx dx];
 
 void XMSManager::Init()
 {
     totalUsed = 0;
     totalAllocated = 0;
     isAvailable = false;
+    buffer = NULL;
+    allocationHandle = 0;
 
     union REGS r;
     struct SREGS s;
@@ -115,6 +118,18 @@ void XMSManager::Init()
 
                     buffer = malloc(XMS_BUFFER_SIZE);
                     isAvailable = buffer != NULL;
+#if MEMORY_DEBUG_LOG
+                    MemoryDebugLog("XMS init ok handle=%u total=%ld buffer=%p", (unsigned)allocationHandle, totalAllocated, buffer);
+#endif
+                    if (!isAvailable)
+                    {
+#if MEMORY_DEBUG_LOG
+                        MemoryDebugLog("XMS init buffer-fail/free handle=%u", (unsigned)allocationHandle);
+#endif
+                        XMSFree(allocationHandle);
+                        allocationHandle = 0;
+                        totalAllocated = 0;
+                    }
 
                     /*
                     printf("Allocating..\n");
@@ -153,10 +168,19 @@ void XMSManager::Init()
             }
         }
     }
+#if MEMORY_DEBUG_LOG
+    if (!isAvailable)
+    {
+        MemoryDebugLog("XMS init unavailable");
+    }
+#endif
 }
 
 void XMSManager::Reset()
 {
+#if MEMORY_DEBUG_LOG
+    MemoryDebugLog("XMS reset used=%ld/%ld", totalUsed, totalAllocated);
+#endif
     totalUsed = 0;
 }
 
@@ -164,8 +188,26 @@ void XMSManager::Shutdown()
 {
     if (isAvailable)
     {
-        XMSFree(allocationHandle);
+        uint16_t handle = allocationHandle;
+#if MEMORY_DEBUG_LOG
+        MemoryDebugLog("XMS shutdown/free handle=%u used=%ld/%ld buffer=%p", (unsigned)handle, totalUsed, totalAllocated, buffer);
+#endif
+        XMSFree(handle);
+#if MEMORY_DEBUG_LOG
+        MemoryDebugLog("XMS shutdown/free done handle=%u", (unsigned)handle);
+#endif
     }
+
+    if (buffer)
+    {
+        free(buffer);
+        buffer = NULL;
+    }
+
+    isAvailable = false;
+    allocationHandle = 0;
+    totalAllocated = 0;
+    totalUsed = 0;
 }
 
 MemBlockHandle XMSManager::Allocate(size_t size)

@@ -100,6 +100,7 @@ public:
 
 private:
 	void ParseChar(char c);
+	void UnwindContextStack();
 
 	//HTMLNode* CreateNode(HTMLNode::NodeType nodeType, HTMLNode* parentNode);
 	void AppendTextBuffer(char c);

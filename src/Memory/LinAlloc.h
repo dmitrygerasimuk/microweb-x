@@ -20,6 +20,7 @@
 #include <string.h>
 #include <new>
 #include "Alloc.h"
+#include "MemoryLog.h"
 #pragma warning(disable:4996)
 
 // 16K chunk size including next chunk pointer
@@ -45,6 +46,9 @@ public:
 	LinearAllocator() : allocOffset(0), numAllocatedChunks(1), totalBytesUsed(0), errorFlag(Error_None)
 	{
 		currentChunk = firstChunk = new Chunk();
+#if MEMORY_DEBUG_LOG
+		MemoryDebugLog("LINALLOC init first=%p chunk=%u", firstChunk, (unsigned)sizeof(Chunk));
+#endif
 	}
 
 	~LinearAllocator()
@@ -55,10 +59,16 @@ public:
 			delete ptr;
 			ptr = next;
 		}
+#if MEMORY_DEBUG_LOG
+		MemoryDebugLog("LINALLOC shutdown chunks=%ld used=%ld", numAllocatedChunks, totalBytesUsed);
+#endif
 	}
 
 	void Reset()
 	{
+#if MEMORY_DEBUG_LOG
+		MemoryDebugLog("LINALLOC reset chunks=%ld used=%ld offset=%u", numAllocatedChunks, totalBytesUsed, (unsigned)allocOffset);
+#endif
 		currentChunk = firstChunk;
 		allocOffset = 0;
 		totalBytesUsed = 0;
@@ -70,12 +80,18 @@ public:
 		if (numBytes >= CHUNK_DATA_SIZE)
 		{
 			errorFlag = Error_AllocationTooLarge;
+#if MEMORY_DEBUG_LOG
+			MemoryDebugLog("LINALLOC fail-too-large size=%lu chunkData=%u", (unsigned long)numBytes, (unsigned)CHUNK_DATA_SIZE);
+#endif
 			return NULL;
 		}
 
 		if (!currentChunk)
 		{
 			errorFlag = Error_OutOfMemory;
+#if MEMORY_DEBUG_LOG
+			MemoryDebugLog("LINALLOC fail-no-current size=%lu chunks=%ld used=%ld", (unsigned long)numBytes, numAllocatedChunks, totalBytesUsed);
+#endif
 			return nullptr;
 		}
 
@@ -92,9 +108,15 @@ public:
 				if (!currentChunk->next)
 				{
 					errorFlag = Error_OutOfMemory;
+#if MEMORY_DEBUG_LOG
+					MemoryDebugLog("LINALLOC fail-new-chunk size=%lu chunks=%ld used=%ld", (unsigned long)numBytes, numAllocatedChunks, totalBytesUsed);
+#endif
 					return NULL;
 				}
 				numAllocatedChunks++;
+#if MEMORY_DEBUG_LOG
+				MemoryDebugLog("LINALLOC new-chunk chunks=%ld used=%ld request=%lu", numAllocatedChunks, totalBytesUsed, (unsigned long)numBytes);
+#endif
 			}
 
 			currentChunk = currentChunk->next;

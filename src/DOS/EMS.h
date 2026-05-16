@@ -11,7 +11,15 @@
 class EMSManager
 {
 public:
-	EMSManager() : isAvailable(false) {}
+	EMSManager()
+		: isAvailable(false)
+		, numAllocatedPages(0)
+		, pageAddressSegment(0)
+		, allocationHandle(0)
+		, allocationPageIndex(0)
+		, allocationPageUsed(0)
+		, nextPageToMap(0)
+	{}
 
 	void Init();
 	void Reset();

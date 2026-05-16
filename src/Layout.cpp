@@ -33,6 +33,10 @@ void Layout::Update()
 	while (currentNodeToProcess && currentNodeToProcess != lastNodeToProcess)
 	{
 		currentNodeToProcess->Handler().BeginLayoutContext(*this, currentNodeToProcess);
+		if (MemoryManager::pageAllocator.GetError())
+		{
+			break;
+		}
 
 		if (currentNodeToProcess->type == Node::Image && App::config.loadImages)
 		{
@@ -49,6 +53,10 @@ void Layout::Update()
 		}
 
 		currentNodeToProcess->Handler().GenerateLayout(*this, currentNodeToProcess);
+		if (MemoryManager::pageAllocator.GetError())
+		{
+			break;
+		}
 
 		if (currentNodeToProcess->firstChild)
 		{
@@ -57,6 +65,10 @@ void Layout::Update()
 		else
 		{
 			currentNodeToProcess->Handler().EndLayoutContext(*this, currentNodeToProcess);
+			if (MemoryManager::pageAllocator.GetError())
+			{
+				break;
+			}
 
 			if (!tableDepth && !lineStartNode)
 			{
@@ -76,6 +88,10 @@ void Layout::Update()
 					if (currentNodeToProcess)
 					{
 						currentNodeToProcess->Handler().EndLayoutContext(*this, currentNodeToProcess);
+						if (MemoryManager::pageAllocator.GetError())
+						{
+							break;
+						}
 
 						if (!tableDepth && !lineStartNode)
 						{
@@ -92,6 +108,19 @@ void Layout::Update()
 			}
 		}
 
+	}
+
+	if (MemoryManager::pageAllocator.GetError())
+	{
+		currentNodeToProcess = nullptr;
+		lastNodeToProcess = nullptr;
+		if (!isFinished)
+		{
+			page.GetApp().pageRenderer.MarkPageLayoutComplete();
+			page.GetApp().ui.SetStatusMessage("Out of memory loading page", StatusBarNode::GeneralStatus);
+			isFinished = true;
+		}
+		return;
 	}
 
 	if (!isFinished && App::Get().parser.IsFinished() && !currentNodeToProcess)

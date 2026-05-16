@@ -85,7 +85,10 @@ void HTMLParser::PushContext(Node* node, const HTMLTagHandler* tag)
 		node->Handler().ApplyStyle(node);
 	}
 
-	contextStack.Push();
+	if (!contextStack.Push())
+	{
+		return;
+	}
 	contextStackSize++;
 
 	contextStack.Top().node = node;
@@ -157,6 +160,15 @@ void HTMLParser::Finish()
 	parseState = ParseFinished;
 	page.layout.MarkParsingComplete();
 	page.GetApp().pageLoadTask.Stop();
+}
+
+void HTMLParser::UnwindContextStack()
+{
+	while (contextStackSize >= 0)
+	{
+		contextStack.Pop();
+		contextStackSize--;
+	}
 }
 
 #define NUM_AMPERSAND_ESCAPE_SEQUENCES (sizeof(ampersandEscapeSequences) / (2 * sizeof(const char*)))
@@ -757,12 +769,10 @@ void HTMLParser::Parse(char* buffer, size_t count)
 
 	if (MemoryManager::pageAllocator.GetError() && contextStackSize >= 0)
 	{
-		// There was a memory error, possibly out of memory. Unwind the context stack
-		while (contextStackSize >= 0)
-		{
-			HTMLParseContext& parseContext = contextStack.Top();
-			PopContext(parseContext.tag);
-		}
+		page.GetApp().ui.SetStatusMessage("Out of memory loading page", StatusBarNode::GeneralStatus);
+		textBufferSize = 0;
+		textBuffer[0] = '\0';
+		UnwindContextStack();
 		Finish();
 	}
 }

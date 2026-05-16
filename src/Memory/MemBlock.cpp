@@ -2,6 +2,7 @@
 #include "MemBlock.h"
 #include "LinAlloc.h"
 #include "Memory.h"
+#include "MemoryLog.h"
 #include "../Platform.h"
 #include "../App.h"
 
@@ -65,11 +66,15 @@ MemBlockAllocator::MemBlockAllocator()
 	, swapBuffer(nullptr)
 	, lastSwapRead(-1)
 	, maxSwapSize(0)
+	, totalAllocated(0)
 {
 }
 
 void MemBlockAllocator::Init()
 {
+#if MEMORY_DEBUG_LOG
+	MemoryDebugLog("MEMBLOCK init useSwap=%d useEMS=%d useXMS=%d", App::config.useSwap, App::config.useEMS, App::config.useXMS);
+#endif
 	if (App::config.useSwap)
 	{
 		swapFile = fopen("Microweb.swp", "wb+");
@@ -86,6 +91,9 @@ void MemBlockAllocator::Init()
 		lastSwapRead = -1;
 		swapFileLength = 0;
 		maxSwapSize = MAX_SWAP_SIZE;
+#if MEMORY_DEBUG_LOG
+		MemoryDebugLog("SWAP init buffer=%p maxAlloc=%u maxSize=%ld", swapBuffer, (unsigned)MAX_SWAP_ALLOCATION, maxSwapSize);
+#endif
 	}
 
 #ifdef __DOS__
@@ -102,6 +110,9 @@ void MemBlockAllocator::Init()
 
 void MemBlockAllocator::Shutdown()
 {
+#if MEMORY_DEBUG_LOG
+	MemoryDebugLog("MEMBLOCK shutdown total=%ld swap=%ld", totalAllocated, swapFileLength);
+#endif
 #ifdef __DOS__
 	ems.Shutdown();
 	xms.Shutdown();
@@ -137,6 +148,11 @@ MemBlockHandle MemBlockAllocator::Allocate(uint16_t size)
 		if (result.IsAllocated())
 		{
 			totalAllocated += size;
+#if MEMORY_DEBUG_LOG
+			MemoryDebugLog("MEMBLOCK alloc EMS size=%u page=%u off=%u total=%ld emsUsed=%ld/%ld",
+				(unsigned)size, (unsigned)result.emsPage, (unsigned)result.emsPageOffset,
+				totalAllocated, ems.TotalUsed(), ems.TotalAllocated());
+#endif
 			return result;
 		}
 	}
@@ -147,6 +163,11 @@ MemBlockHandle MemBlockAllocator::Allocate(uint16_t size)
 		if (result.IsAllocated())
 		{
 			totalAllocated += size;
+#if MEMORY_DEBUG_LOG
+			MemoryDebugLog("MEMBLOCK alloc XMS size=%u ptr=%lu len=%u total=%ld xmsUsed=%ld/%ld",
+				(unsigned)size, (unsigned long)result.xmsPointer, (unsigned)result.xmsLength,
+				totalAllocated, xms.TotalUsed(), xms.TotalAllocated());
+#endif
 			return result;
 		}
 	}
@@ -182,6 +203,11 @@ MemBlockHandle MemBlockAllocator::Allocate(uint16_t size)
 			swapFileLength += sizeNeededForSwap;
 			result.type = MemBlockHandle::DiskSwap;
 			totalAllocated += sizeNeededForSwap;
+#if MEMORY_DEBUG_LOG
+			MemoryDebugLog("MEMBLOCK alloc SWAP size=%u stored=%u pos=%ld total=%ld swap=%ld",
+				(unsigned)size, (unsigned)sizeNeededForSwap, result.swapFilePosition,
+				totalAllocated, swapFileLength);
+#endif
 			return result;
 		}
 	}
@@ -193,7 +219,22 @@ MemBlockHandle MemBlockAllocator::Allocate(uint16_t size)
 		{
 			result.type = MemBlockHandle::Conventional;
 			totalAllocated += size;
+#if MEMORY_DEBUG_LOG
+			MemoryDebugLog("MEMBLOCK alloc CONV size=%u ptr=%p total=%ld pageUsed=%ld/%ld dosFree=%ldK",
+				(unsigned)size, result.conventionalPointer, totalAllocated,
+				MemoryManager::pageAllocator.TotalUsed(), MemoryManager::pageAllocator.TotalAllocated(),
+				MemoryManager::GetConventionalMemoryAvailableKB());
+#endif
 		}
+#if MEMORY_DEBUG_LOG
+		else
+		{
+			MemoryDebugLog("MEMBLOCK alloc FAIL size=%u total=%ld pageUsed=%ld/%ld dosFree=%ldK",
+				(unsigned)size, totalAllocated,
+				MemoryManager::pageAllocator.TotalUsed(), MemoryManager::pageAllocator.TotalAllocated(),
+				MemoryManager::GetConventionalMemoryAvailableKB());
+		}
+#endif
 	}
 
 	return result;
@@ -227,11 +268,17 @@ void MemBlockAllocator::CommitSwap(MemBlockHandle& handle)
 
 void MemBlockAllocator::Reset()
 {
+#if MEMORY_DEBUG_LOG
+	MemoryDebugLog("MEMBLOCK reset total=%ld swap=%ld pageUsed=%ld/%ld",
+		totalAllocated, swapFileLength,
+		MemoryManager::pageAllocator.TotalUsed(), MemoryManager::pageAllocator.TotalAllocated());
+#endif
 	swapFileLength = 0;
 	lastSwapRead = -1;
 	totalAllocated = 0;
 
 #ifdef __DOS__
 	ems.Reset();
+	xms.Reset();
 #endif
 }

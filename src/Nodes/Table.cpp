@@ -127,7 +127,14 @@ void TableNode::EndLayoutContext(Layout& layout, Node* node)
 
 			if (!data->cells || !data->columns)
 			{
-				// TODO: allocation error
+				data->state = Data::FinishedLayout;
+				node->size.x = 0;
+				node->size.y = 0;
+				if (layout.tableDepth > 0)
+				{
+					layout.tableDepth--;
+				}
+				layout.BreakNewLine();
 				return;
 			}
 
