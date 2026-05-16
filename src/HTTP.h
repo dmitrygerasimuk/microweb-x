@@ -62,6 +62,7 @@ public:
 	const char* GetURL() { return url.url; }
 	const char* GetContentType() { return contentType; }
 	long GetContentSize() { return contentSize;  }
+	long GetBytesDownloaded() { return bytesDownloaded; }
 
 private:
 	enum InternalStatus
@@ -123,6 +124,7 @@ private:
 
 	long contentRemaining;
 	long contentSize;
+	long bytesDownloaded;
 
 	long chunkSizeRemaining;
 	bool usingChunkedTransfer;

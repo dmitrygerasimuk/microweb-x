@@ -22,6 +22,40 @@
 App* App::app;
 AppConfig App::config;
 
+static void FormatByteCount(char* buffer, int bufferSize, long bytes)
+{
+	if (bytes < 1000)
+	{
+		snprintf(buffer, bufferSize, "%ld B", bytes);
+	}
+	else if (bytes < 1000000l)
+	{
+		snprintf(buffer, bufferSize, "%ld KB", bytes / 1000);
+	}
+	else
+	{
+		snprintf(buffer, bufferSize, "%ld MB", bytes / 1000000l);
+	}
+}
+
+static void FormatLoadProgress(char* buffer, int bufferSize, const char* prefix, LoadTask& loadTask)
+{
+	char downloaded[16];
+	char total[16];
+	long contentSize = loadTask.GetContentSize();
+
+	FormatByteCount(downloaded, sizeof(downloaded), loadTask.GetBytesDownloaded());
+	if (contentSize > 0)
+	{
+		FormatByteCount(total, sizeof(total), contentSize);
+		snprintf(buffer, bufferSize, "%s %s/%s", prefix, downloaded, total);
+	}
+	else
+	{
+		snprintf(buffer, bufferSize, "%s %s", prefix, downloaded);
+	}
+}
+
 App::App() 
 	: page(*this), pageRenderer(*this), parser(page), ui(*this)
 {
@@ -153,11 +187,13 @@ void App::Run(int argc, char* argv[])
 			}
 
 			clock_t loadEndTime = clock() + UPDATE_TIME_SLICE;
+			size_t totalBytesRead = 0;
 			do 
 			{
 				size_t bytesRead = pageLoadTask.GetContent(loadBuffer, APP_LOAD_BUFFER_SIZE);
 				if (bytesRead)
 				{
+					totalBytesRead += bytesRead;
 					if (pageLoadTask.downloadFile)
 					{
 						fwrite(loadBuffer, 1, bytesRead, pageLoadTask.downloadFile);
@@ -176,6 +212,20 @@ void App::Run(int argc, char* argv[])
 
 				Platform::input->RefreshMouse();
 			} while (clock() < loadEndTime && !Platform::input->HasInputPending());
+
+			if (totalBytesRead && pageLoadTask.type == LoadTask::RemoteFile)
+			{
+				char statusMessage[64];
+				if (pageLoadTask.IsDownloadComplete())
+				{
+					ui.SetStatusMessage(pageLoadTask.downloadFile ? "Download complete" : "Loading complete", StatusBarNode::GeneralStatus);
+				}
+				else
+				{
+					FormatLoadProgress(statusMessage, sizeof(statusMessage), pageLoadTask.downloadFile ? "Downloading" : "Loading", pageLoadTask);
+					ui.SetStatusMessage(statusMessage, StatusBarNode::GeneralStatus);
+				}
+			}
 			
 		}
 		else
@@ -232,11 +282,13 @@ void App::Run(int argc, char* argv[])
 		if (pageContentLoadTask.HasContent())
 		{
 			clock_t contentLoadEndTime = clock() + UPDATE_TIME_SLICE;
+			size_t totalBytesRead = 0;
 			do
 			{
 				size_t bytesRead = pageContentLoadTask.GetContent(loadBuffer, APP_LOAD_BUFFER_SIZE);
 				if (bytesRead)
 				{
+					totalBytesRead += bytesRead;
 					bool stillProcessing = loadTaskTargetNode->Handler().ParseContent(loadTaskTargetNode, loadBuffer, bytesRead);
 					if (!stillProcessing)
 					{
@@ -247,6 +299,20 @@ void App::Run(int argc, char* argv[])
 
 				Platform::input->RefreshMouse();
 			} while (clock() < contentLoadEndTime && !Platform::input->HasInputPending());
+
+			if (totalBytesRead && pageContentLoadTask.type == LoadTask::RemoteFile)
+			{
+				char statusMessage[64];
+				if (pageContentLoadTask.IsDownloadComplete())
+				{
+					ui.SetStatusMessage("Image loaded", StatusBarNode::GeneralStatus);
+				}
+				else
+				{
+					FormatLoadProgress(statusMessage, sizeof(statusMessage), "Loading image", pageContentLoadTask);
+					ui.SetStatusMessage(statusMessage, StatusBarNode::GeneralStatus);
+				}
+			}
 		}
 		else if(!pageContentLoadTask.IsBusy())
 		{
@@ -280,6 +346,9 @@ void App::Run(int argc, char* argv[])
 void LoadTask::Load(HTTPRequest::RequestType requestType, const char* targetURL, HTTPOptions* options)
 {
 	Stop();
+	bytesDownloaded = 0;
+	contentSize = 0;
+	downloadComplete = false;
 
 	url = targetURL;
 
@@ -354,6 +423,13 @@ void LoadTask::Load(HTTPRequest::RequestType requestType, const char* targetURL,
 
 void LoadTask::Stop()
 {
+	if (type == LoadTask::RemoteFile && request)
+	{
+		bytesDownloaded = request->GetBytesDownloaded();
+		contentSize = request->GetContentSize();
+		downloadComplete = request->GetStatus() == HTTPRequest::Finished || (contentSize > 0 && bytesDownloaded >= contentSize);
+	}
+
 	if (debugDumpFile)
 	{
 		fclose(debugDumpFile);
@@ -433,9 +509,20 @@ size_t LoadTask::GetContent(char* buffer, size_t count)
 			switch (request->GetStatus())
 			{
 			case HTTPRequest::Downloading:
-				return request->ReadData(buffer, count);
+			{
+				size_t bytesRead = request->ReadData(buffer, count);
+				bytesDownloaded = request->GetBytesDownloaded();
+				contentSize = request->GetContentSize();
+				downloadComplete = request->GetStatus() == HTTPRequest::Finished || (contentSize > 0 && bytesDownloaded >= contentSize);
+				return bytesRead;
+			}
 			case HTTPRequest::Error:
+				Stop();
+				break;
 			case HTTPRequest::Finished:
+				downloadComplete = true;
+				Stop();
+				break;
 			case HTTPRequest::Stopped:
 				Stop();
 				break;
@@ -483,6 +570,35 @@ const char* LoadTask::GetContentType()
 
 		return "text/html";
 	}
+}
+
+long LoadTask::GetContentSize()
+{
+	if (type == LoadTask::RemoteFile && request)
+	{
+		return request->GetContentSize();
+	}
+	return contentSize;
+}
+
+long LoadTask::GetBytesDownloaded()
+{
+	if (type == LoadTask::RemoteFile && request)
+	{
+		return request->GetBytesDownloaded();
+	}
+	return bytesDownloaded;
+}
+
+bool LoadTask::IsDownloadComplete()
+{
+	if (type == LoadTask::RemoteFile && request)
+	{
+		long requestContentSize = request->GetContentSize();
+		long requestBytesDownloaded = request->GetBytesDownloaded();
+		return request->GetStatus() == HTTPRequest::Finished || (requestContentSize > 0 && requestBytesDownloaded >= requestContentSize);
+	}
+	return downloadComplete;
 }
 
 void App::RequestNewPage(HTTPRequest::RequestType requestType, const char* url, HTTPOptions* options)

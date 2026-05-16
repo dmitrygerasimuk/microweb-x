@@ -10,6 +10,10 @@
 #define GIF_INTERLACE_BIT 0x40
 #define GIF_LINE_BUFFER_MAX_SIZE 640
 
+#ifndef GIF_PROFILE
+#define GIF_PROFILE 0
+#endif
+
 class GifDecoder : public ImageDecoder
 {
 public:
@@ -28,6 +32,10 @@ private:
 	void ProcessLineBuffer();
 	void EmitLine(int y);
 
+#if GIF_PROFILE
+	void ResetProfile();
+	void PrintProfile(const char* result);
+#endif
 
 	enum InternalState
 	{
@@ -125,7 +133,10 @@ private:
 			int code;
 			int prev;
 			int dictionaryIndex;
-			uint32_t bitBuffer;
+			int codeLimit;
+			uint16_t codeMask;
+			uint16_t bitBuffer;
+			uint8_t bitBufferHigh;
 			int bitCount;
 			
 			int drawX, drawY;
@@ -151,6 +162,33 @@ private:
 			GraphicControlExtension graphicControlExtension;
 		};		
 	//};
+
+#if GIF_PROFILE
+	unsigned long profileProcessCalls;
+	unsigned long profileInputBytes;
+	unsigned long profileSubBlocks;
+	unsigned long profileLzwBytes;
+	unsigned long profileLzwCodes;
+	unsigned long profileClearCodes;
+	unsigned long profileStopCodes;
+	unsigned long profileDictionaryAdds;
+	unsigned long profileDictionaryResets;
+	unsigned long profileDictionarySteps;
+	unsigned long profileMaxStackSize;
+	unsigned long profileDecodedPixels;
+	unsigned long profileStoredPixels;
+	unsigned long profileSkippedPixels;
+	unsigned long profileProcessLines;
+	unsigned long profileEmitLines;
+	unsigned long profileEmitPixels;
+	unsigned long profileDirectEmitLines;
+	unsigned long profileXScaleEmitLines;
+	unsigned long profileGenericScaleEmitLines;
+	unsigned long profilePaletteBuilds;
+	unsigned long profileColourDitherBuilds;
+	long profileStartClock;
+	uint8_t profilePrinted;
+#endif
 };
 
 #endif

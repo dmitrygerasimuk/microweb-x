@@ -7,6 +7,8 @@
 #include "../App.h"
 #include "../Draw/Surface.h"
 #include <stdio.h>
+#include <string.h>
+#include <time.h>
 
 #ifdef _WIN32
 #define DEBUG_MESSAGE(...) printf(__VA_ARGS__);
@@ -19,11 +21,40 @@
 #define BLOCK_TYPE_TRAILER 0x3B
 #define BLOCK_TYPE_GRAPHIC_CONTROL_EXTENSION 0xF9
 
+#define GIF_MONO_PACK_PIXEL(outByte, srcValue, threshold, bitMask) \
+	do \
+	{ \
+		if (paletteLUT[(srcValue)] > (threshold)) \
+		{ \
+			(outByte) |= (bitMask); \
+		} \
+	} while (0)
+
+#if GIF_PROFILE
+#define GIF_PROFILE_FINISH(result) PrintProfile(result)
+#define GIF_RESET_DICTIONARY() \
+	do \
+	{ \
+		profileDictionaryResets++; \
+		dictionaryIndex = clearCode + 2; \
+	} while (0)
+#else
+#define GIF_PROFILE_FINISH(result)
+#define GIF_RESET_DICTIONARY() \
+	do \
+	{ \
+		dictionaryIndex = clearCode + 2; \
+	} while (0)
+#endif
+
 GifDecoder::GifDecoder() 
 {
 	internalState = ParseHeader;
 	lineBufferSkipCount = 0;
 	transparentColourIndex = -1;
+#if GIF_PROFILE
+	ResetProfile();
+#endif
 }
 
 void GifDecoder::Process(uint8_t* data, size_t dataLength)
@@ -32,6 +63,15 @@ void GifDecoder::Process(uint8_t* data, size_t dataLength)
 	{
 		return;
 	}
+
+#if GIF_PROFILE
+	if (profileProcessCalls == 0)
+	{
+		profileStartClock = clock();
+	}
+	profileProcessCalls++;
+	profileInputBytes += (unsigned long)dataLength;
+#endif
 	
 	while(dataLength > 0)
 	{
@@ -46,6 +86,7 @@ void GifDecoder::Process(uint8_t* data, size_t dataLength)
 					{
 						// Not a GIF89a
 						state = ImageDecoder::Error;
+						GIF_PROFILE_FINISH("bad-header");
 						return;
 					}
 
@@ -61,6 +102,7 @@ void GifDecoder::Process(uint8_t* data, size_t dataLength)
 					if (onlyDownloadDimensions)
 					{
 						state = ImageDecoder::Success;
+						GIF_PROFILE_FINISH("dimensions");
 						return;
 					}
 
@@ -79,6 +121,7 @@ void GifDecoder::Process(uint8_t* data, size_t dataLength)
 						// Allocation error
 						DEBUG_MESSAGE("Could not allocate!\n");
 						state = ImageDecoder::Error;
+						GIF_PROFILE_FINISH("alloc-lines");
 						return;
 					}
 
@@ -94,6 +137,7 @@ void GifDecoder::Process(uint8_t* data, size_t dataLength)
 							DEBUG_MESSAGE("Could not allocate!\n");
 							outputImage->lines.type = MemBlockHandle::Unallocated;
 							state = ImageDecoder::Error;
+							GIF_PROFILE_FINISH("alloc-line");
 							return;
 						}
 					}
@@ -166,6 +210,7 @@ void GifDecoder::Process(uint8_t* data, size_t dataLength)
 					case BLOCK_TYPE_TRAILER:
 					// End of GIF
 					state = ImageDecoder::Success;
+					GIF_PROFILE_FINISH("trailer");
 					return;
 					
 					case BLOCK_TYPE_EXTENSION_INTRODUCER:
@@ -175,6 +220,7 @@ void GifDecoder::Process(uint8_t* data, size_t dataLength)
 					default:
 						DEBUG_MESSAGE("Invalid block type: %x\n", (int)(blockType));
 					state = ImageDecoder::Error;
+					GIF_PROFILE_FINISH("bad-block");
 					return;
 				}
 			}
@@ -244,10 +290,20 @@ void GifDecoder::Process(uint8_t* data, size_t dataLength)
 				clearCode = 1 << lzwCodeSize;
 				stopCode = clearCode + 1;
 				codeLength = resetCodeLength = lzwCodeSize + 1;
+				codeLimit = 1 << codeLength;
+				codeMask = (uint16_t)(codeLimit - 1);
 				bitBuffer = 0;
+				bitBufferHigh = 0;
 				bitCount = 0;
 				prev = -1;
-				ClearDictionary();
+
+				for(dictionaryIndex = 0; dictionaryIndex < clearCode; dictionaryIndex++)
+				{
+					dictionary[dictionaryIndex].byte = (uint8_t) dictionaryIndex;
+					dictionary[dictionaryIndex].prev = -1;
+					dictionary[dictionaryIndex].first = (uint8_t) dictionaryIndex;
+				}
+				GIF_RESET_DICTIONARY();
 
 				internalState = ParseImageSubBlockSize;
 			}
@@ -256,6 +312,9 @@ void GifDecoder::Process(uint8_t* data, size_t dataLength)
 			case ParseImageSubBlockSize:
 			{
 				imageSubBlockSize = NextByte(&data, dataLength);
+#if GIF_PROFILE
+				profileSubBlocks++;
+#endif
 				DEBUG_MESSAGE("Sub block size: %d bytes\n", imageSubBlockSize);
 				if(imageSubBlockSize)
 				{
@@ -267,6 +326,7 @@ void GifDecoder::Process(uint8_t* data, size_t dataLength)
 
 					// HACK: Finish decoding after first frame
 					state = ImageDecoder::Success;
+					GIF_PROFILE_FINISH("first-frame");
 					return;
 				}
 			}
@@ -279,15 +339,30 @@ void GifDecoder::Process(uint8_t* data, size_t dataLength)
 					imageSubBlockSize--;
 					uint8_t dataByte = NextByte(&data, dataLength);
 					//DEBUG_MESSAGE("-Data: %x\n", dataByte);
+#if GIF_PROFILE
+					profileLzwBytes++;
+#endif
 
-					bitBuffer |= ((uint32_t)dataByte << bitCount);
+					if (bitCount < 8)
+					{
+						bitBuffer |= (uint16_t)((uint16_t)dataByte << bitCount);
+					}
+					else
+					{
+						bitBuffer |= (uint16_t)((uint16_t)dataByte << bitCount);
+						bitBufferHigh |= (uint8_t)(dataByte >> (16 - bitCount));
+					}
 					bitCount += 8;
 
 					while (bitCount >= codeLength)
 					{
-						int currentCode = (int)(bitBuffer & ((1 << codeLength) - 1));
-						bitBuffer >>= codeLength;
+						int currentCode = (int)(bitBuffer & codeMask);
+						bitBuffer = (uint16_t)((bitBuffer >> codeLength) | ((uint16_t)bitBufferHigh << (16 - codeLength)));
+						bitBufferHigh = (uint8_t)(bitBufferHigh >> codeLength);
 						bitCount -= codeLength;
+#if GIF_PROFILE
+						profileLzwCodes++;
+#endif
 
 						//DEBUG_MESSAGE("code: %x [len=%d]\n", currentCode, codeLength);
 
@@ -295,14 +370,22 @@ void GifDecoder::Process(uint8_t* data, size_t dataLength)
 						if (currentCode == clearCode)
 						{
 							DEBUG_MESSAGE("CLEAR\n");
+#if GIF_PROFILE
+							profileClearCodes++;
+#endif
 							codeLength = resetCodeLength;
-							ClearDictionary();
+							codeLimit = 1 << codeLength;
+							codeMask = (uint16_t)(codeLimit - 1);
+							GIF_RESET_DICTIONARY();
 							prev = -1;
 							continue;
 						}
 						else if (currentCode == stopCode)
 						{
 							DEBUG_MESSAGE("STOP\n");
+#if GIF_PROFILE
+							profileStopCodes++;
+#endif
 							if (imageSubBlockSize)
 							{
 								DEBUG_MESSAGE("Malformed GIF\n");
@@ -317,7 +400,42 @@ void GifDecoder::Process(uint8_t* data, size_t dataLength)
 						{
 							DEBUG_MESSAGE("Error: code = %x\n", currentCode);
 							state = ImageDecoder::Error;
+							GIF_PROFILE_FINISH("bad-code");
 							return;
+						}
+
+						if (prev < 0 && currentCode < clearCode)
+						{
+							prev = currentCode;
+
+							if (lineBufferSkipCount == lineBufferDivider - 1)
+							{
+								lineBuffer[lineBufferSize++] = (uint8_t)currentCode;
+								lineBufferSkipCount = 0;
+#if GIF_PROFILE
+								profileStoredPixels++;
+#endif
+							}
+							else
+							{
+								lineBufferSkipCount++;
+#if GIF_PROFILE
+								profileSkippedPixels++;
+#endif
+							}
+
+							lineBufferFlushCount++;
+#if GIF_PROFILE
+							profileDecodedPixels++;
+#endif
+
+							if (lineBufferFlushCount == imageDescriptor.width)
+							{
+								ProcessLineBuffer();
+								lineBufferSize = 0;
+								lineBufferFlushCount = 0;
+							}
+							continue;
 						}
 
 						if (prev > -1 && dictionaryIndex < GIF_MAX_DICTIONARY_ENTRIES)
@@ -326,6 +444,7 @@ void GifDecoder::Process(uint8_t* data, size_t dataLength)
 							{
 								DEBUG_MESSAGE("Error: code = %x, but dictionaryIndex = %x\n", currentCode, dictionaryIndex);
 								state = ImageDecoder::Error;
+								GIF_PROFILE_FINISH("bad-dict");
 								return;
 							}
 
@@ -335,10 +454,15 @@ void GifDecoder::Process(uint8_t* data, size_t dataLength)
 							dictionary[dictionaryIndex].first = dictionary[prev].first;
 
 							dictionaryIndex++;
+#if GIF_PROFILE
+							profileDictionaryAdds++;
+#endif
 
-							if(dictionaryIndex == (1 << (codeLength)) && codeLength < 12)
+							if(dictionaryIndex == codeLimit && codeLength < 12)
 							{
 								codeLength++;
+								codeLimit <<= 1;
+								codeMask = (uint16_t)(codeLimit - 1);
 								//DEBUG_MESSAGE("Code length: %d\n", codeLength);
 							}
 						}
@@ -357,10 +481,19 @@ void GifDecoder::Process(uint8_t* data, size_t dataLength)
 								}
 
 								decodeStack[stackSize++] = dictionary[code].byte;
+#if GIF_PROFILE
+								profileDictionarySteps++;
+#endif
 								//DEBUG_MESSAGE(" value: %x\n", dictionary[code].byte);
 
 								code = dictionary[code].prev;
 							}
+#if GIF_PROFILE
+							if ((unsigned long)stackSize > profileMaxStackSize)
+							{
+								profileMaxStackSize = (unsigned long)stackSize;
+							}
+#endif
 
 							while (stackSize)
 							{
@@ -368,13 +501,22 @@ void GifDecoder::Process(uint8_t* data, size_t dataLength)
 								{
 									lineBuffer[lineBufferSize++] = decodeStack[stackSize - 1];
 									lineBufferSkipCount = 0;
+#if GIF_PROFILE
+									profileStoredPixels++;
+#endif
 								}
 								else
 								{
 									lineBufferSkipCount++;
+#if GIF_PROFILE
+									profileSkippedPixels++;
+#endif
 								}
 
 								lineBufferFlushCount++;
+#if GIF_PROFILE
+								profileDecodedPixels++;
+#endif
 								stackSize--;
 
 								if (lineBufferFlushCount == imageDescriptor.width)
@@ -467,16 +609,91 @@ void GifDecoder::Process(uint8_t* data, size_t dataLength)
 	}
 }
 
+#if GIF_PROFILE
+void GifDecoder::ResetProfile()
+{
+	profileProcessCalls = 0;
+	profileInputBytes = 0;
+	profileSubBlocks = 0;
+	profileLzwBytes = 0;
+	profileLzwCodes = 0;
+	profileClearCodes = 0;
+	profileStopCodes = 0;
+	profileDictionaryAdds = 0;
+	profileDictionaryResets = 0;
+	profileDictionarySteps = 0;
+	profileMaxStackSize = 0;
+	profileDecodedPixels = 0;
+	profileStoredPixels = 0;
+	profileSkippedPixels = 0;
+	profileProcessLines = 0;
+	profileEmitLines = 0;
+	profileEmitPixels = 0;
+	profileDirectEmitLines = 0;
+	profileXScaleEmitLines = 0;
+	profileGenericScaleEmitLines = 0;
+	profilePaletteBuilds = 0;
+	profileColourDitherBuilds = 0;
+	profileStartClock = 0;
+	profilePrinted = 0;
+}
+
+void GifDecoder::PrintProfile(const char* result)
+{
+	FILE* profileFile;
+
+	if (profilePrinted)
+	{
+		return;
+	}
+
+	profilePrinted = 1;
+	profileFile = fopen("C:\\GIFPROF.TXT", "a");
+	if (!profileFile)
+	{
+		profileFile = fopen("GIFPROF.TXT", "a");
+	}
+	if (!profileFile)
+	{
+		profileFile = stdout;
+	}
+
+	long elapsedTicks = clock() - profileStartClock;
+	unsigned long elapsedMs = 0;
+	if (CLOCKS_PER_SEC)
+	{
+		elapsedMs = ((unsigned long)elapsedTicks * 1000UL) / (unsigned long)CLOCKS_PER_SEC;
+	}
+
+	fprintf(profileFile, "\nGIF profile [%s]\n", result);
+	fprintf(profileFile, "image: %u x %u -> %u x %u, bpp=%d, divider=%d\n",
+		header.width, header.height, outputImage->width, outputImage->height,
+		outputImage->bpp, lineBufferDivider);
+	fprintf(profileFile, "time: %ld ticks, %lu ms, calls=%lu input=%lu\n",
+		elapsedTicks, elapsedMs, profileProcessCalls, profileInputBytes);
+	fprintf(profileFile, "lzw: blocks=%lu bytes=%lu codes=%lu clear=%lu stop=%lu\n",
+		profileSubBlocks, profileLzwBytes, profileLzwCodes, profileClearCodes, profileStopCodes);
+	fprintf(profileFile, "dict: resets=%lu adds=%lu steps=%lu maxStack=%lu\n",
+		profileDictionaryResets, profileDictionaryAdds, profileDictionarySteps, profileMaxStackSize);
+	fprintf(profileFile, "pixels: decoded=%lu stored=%lu skipped=%lu\n",
+		profileDecodedPixels, profileStoredPixels, profileSkippedPixels);
+	fprintf(profileFile, "lines: decoded=%lu emitted=%lu emitPixels=%lu direct=%lu xscale=%lu generic=%lu\n",
+		profileProcessLines, profileEmitLines, profileEmitPixels,
+		profileDirectEmitLines, profileXScaleEmitLines, profileGenericScaleEmitLines);
+	fprintf(profileFile, "palette: builds=%lu ditherBuilds=%lu\n",
+		profilePaletteBuilds, profileColourDitherBuilds);
+
+	if (profileFile != stdout)
+	{
+		fflush(profileFile);
+		fclose(profileFile);
+	}
+}
+#endif
+
 void GifDecoder::ClearDictionary()
 {
-	for(dictionaryIndex = 0; dictionaryIndex < (1 << lzwCodeSize); dictionaryIndex++)
-	{
-		dictionary[dictionaryIndex].byte = (uint8_t) dictionaryIndex;
-		dictionary[dictionaryIndex].prev = -1;
-		dictionary[dictionaryIndex].first = (uint8_t) dictionaryIndex;
-	}
-	
-	dictionaryIndex += 2;
+	GIF_RESET_DICTIONARY();
 }
 
 void GifDecoder::BuildXScaleBuffer()
@@ -513,6 +730,9 @@ void GifDecoder::BuildXScaleBuffer()
 
 void GifDecoder::BuildPaletteLUT(int colourCount)
 {
+#if GIF_PROFILE
+	profilePaletteBuilds++;
+#endif
 	if (outputImage->bpp == 8)
 	{
 		for (int n = 0; n < colourCount; n++)
@@ -541,6 +761,9 @@ void GifDecoder::BuildPaletteLUT(int colourCount)
 
 void GifDecoder::BuildColourDitherLUT(int colourCount)
 {
+#if GIF_PROFILE
+	profileColourDitherBuilds++;
+#endif
 	uint8_t* videoPaletteLUT = Platform::video->paletteLUT;
 
 	for (int dither = 0; dither < 16; dither++)
@@ -548,7 +771,7 @@ void GifDecoder::BuildColourDitherLUT(int colourCount)
 		int offset = colourDitherMatrix[dither];
 		for (int n = 0; n < colourCount; n++)
 		{
-			int index = n * 3;
+			int index = (n << 1) + n;
 			int red = palette[index] + offset;
 			if (red > 255)
 				red = 255;
@@ -573,26 +796,52 @@ void GifDecoder::BuildColourDitherLUT(int colourCount)
 // Compute output index of y-th input line, in frame of height h. 
 int GifDecoder::CalculateLineIndex(int y)
 {
-	int p; /* number of lines in current pass */
+    int h;
+    int p;
 
-	p = (header.height - 1) / 8 + 1;
-	if (y < p) /* pass 1 */
-		return y * 8;
-	y -= p;
-	p = (header.height - 5) / 8 + 1;
-	if (y < p) /* pass 2 */
-		return y * 8 + 4;
-	y -= p;
-	p = (header.height - 3) / 4 + 1;
-	if (y < p) /* pass 3 */
-		return y * 4 + 2;
-	y -= p;
-	/* pass 4 */
-	return y * 2 + 1;
+    h = header.height;
+
+    /*
+       pass 1: 0, 8, 16, ...
+       count = ceil(h / 8)
+    */
+    p = (h + 7) >> 3;
+    if (y < p)
+        return y << 3;          /* y * 8 */
+
+    y -= p;
+
+    /*
+       pass 2: 4, 12, 20, ...
+       count = number of lines >= 4 with step 8
+    */
+    p = (h > 4) ? ((h + 3) >> 3) : 0;
+    if (y < p)
+        return (y << 3) + 4;    /* y * 8 + 4 */
+
+    y -= p;
+
+    /*
+       pass 3: 2, 6, 10, ...
+       count = number of lines >= 2 with step 4
+    */
+    p = (h + 1) >> 2;
+    if (y < p)
+        return (y << 2) + 2;    /* y * 4 + 2 */
+
+    y -= p;
+
+    /*
+       pass 4: 1, 3, 5, ...
+    */
+    return (y << 1) + 1;        /* y * 2 + 1 */
 }
 
 void GifDecoder::ProcessLineBuffer()
 {
+#if GIF_PROFILE
+	profileProcessLines++;
+#endif
 	int outputY = linesProcessed;
 	
 	if (imageDescriptor.fields & GIF_INTERLACE_BIT)
@@ -639,6 +888,22 @@ void GifDecoder::ProcessLineBuffer()
 
 void GifDecoder::EmitLine(int y)
 {
+#if GIF_PROFILE
+	profileEmitLines++;
+	profileEmitPixels += (unsigned long)outputImage->width;
+	if (outputImage->width == lineBufferSize)
+	{
+		profileDirectEmitLines++;
+	}
+	else if (useXScaleBuffer && lineBufferSize == scaledLineBufferSize)
+	{
+		profileXScaleEmitLines++;
+	}
+	else
+	{
+		profileGenericScaleEmitLines++;
+	}
+#endif
 	MemBlockHandle* lines = outputImage->lines.Get<MemBlockHandle*>();
 	MemBlockHandle lineOutput = lines[y];
 	uint8_t* output = lineOutput.Get<uint8_t*>();
@@ -725,18 +990,35 @@ void GifDecoder::EmitLine(int y)
 
 		if (outputImage->width == lineBufferSize)
 		{
-			for (int i = 0; i < lineBufferSize; i++)
+			uint8_t* src = lineBuffer;
+			int byteCount = lineBufferSize >> 3;
+			int i = 0;
+
+			while (byteCount)
 			{
-				uint8_t value = paletteLUT[lineBuffer[i]];
-				uint8_t threshold = ditherPattern[ditherIndex];
+				const uint8_t* dither = ditherPattern + ((i & 8) ? 8 : 0);
+				buffer = 0;
 
-				if (value > threshold)
-				{
-					buffer |= mask;
-				}
+				GIF_MONO_PACK_PIXEL(buffer, src[0], dither[0], 0x80);
+				GIF_MONO_PACK_PIXEL(buffer, src[1], dither[1], 0x40);
+				GIF_MONO_PACK_PIXEL(buffer, src[2], dither[2], 0x20);
+				GIF_MONO_PACK_PIXEL(buffer, src[3], dither[3], 0x10);
+				GIF_MONO_PACK_PIXEL(buffer, src[4], dither[4], 0x08);
+				GIF_MONO_PACK_PIXEL(buffer, src[5], dither[5], 0x04);
+				GIF_MONO_PACK_PIXEL(buffer, src[6], dither[6], 0x02);
+				GIF_MONO_PACK_PIXEL(buffer, src[7], dither[7], 0x01);
 
-				ditherIndex = (ditherIndex + 1) & 15;
+				*output++ = buffer;
+				src += 8;
+				i += 8;
+				byteCount--;
+			}
 
+			ditherIndex = i & 15;
+			buffer = 0;
+			while (i < lineBufferSize)
+			{
+				GIF_MONO_PACK_PIXEL(buffer, lineBuffer[i], ditherPattern[ditherIndex], mask);
 				mask >>= 1;
 				if (!mask)
 				{
@@ -744,6 +1026,8 @@ void GifDecoder::EmitLine(int y)
 					buffer = 0;
 					mask = 0x80;
 				}
+				ditherIndex = (ditherIndex + 1) & 15;
+				i++;
 			}
 
 			if (mask != 0x80)
@@ -753,18 +1037,33 @@ void GifDecoder::EmitLine(int y)
 		}
 		else if (useXScaleBuffer && lineBufferSize == scaledLineBufferSize)
 		{
-			for (int i = 0; i < outputImage->width; i++)
+			int byteCount = outputImage->width >> 3;
+			int i = 0;
+
+			while (byteCount)
 			{
-				uint8_t value = paletteLUT[lineBuffer[xScaleBuffer[i]]];
-				uint8_t threshold = ditherPattern[ditherIndex];
+				const uint8_t* dither = ditherPattern + ((i & 8) ? 8 : 0);
+				buffer = 0;
 
-				if (value > threshold)
-				{
-					buffer |= mask;
-				}
+				GIF_MONO_PACK_PIXEL(buffer, lineBuffer[xScaleBuffer[i]], dither[0], 0x80);
+				GIF_MONO_PACK_PIXEL(buffer, lineBuffer[xScaleBuffer[i + 1]], dither[1], 0x40);
+				GIF_MONO_PACK_PIXEL(buffer, lineBuffer[xScaleBuffer[i + 2]], dither[2], 0x20);
+				GIF_MONO_PACK_PIXEL(buffer, lineBuffer[xScaleBuffer[i + 3]], dither[3], 0x10);
+				GIF_MONO_PACK_PIXEL(buffer, lineBuffer[xScaleBuffer[i + 4]], dither[4], 0x08);
+				GIF_MONO_PACK_PIXEL(buffer, lineBuffer[xScaleBuffer[i + 5]], dither[5], 0x04);
+				GIF_MONO_PACK_PIXEL(buffer, lineBuffer[xScaleBuffer[i + 6]], dither[6], 0x02);
+				GIF_MONO_PACK_PIXEL(buffer, lineBuffer[xScaleBuffer[i + 7]], dither[7], 0x01);
 
-				ditherIndex = (ditherIndex + 1) & 15;
+				*output++ = buffer;
+				i += 8;
+				byteCount--;
+			}
 
+			ditherIndex = i & 15;
+			buffer = 0;
+			while (i < outputImage->width)
+			{
+				GIF_MONO_PACK_PIXEL(buffer, lineBuffer[xScaleBuffer[i]], ditherPattern[ditherIndex], mask);
 				mask >>= 1;
 				if (!mask)
 				{
@@ -772,6 +1071,8 @@ void GifDecoder::EmitLine(int y)
 					buffer = 0;
 					mask = 0x80;
 				}
+				ditherIndex = (ditherIndex + 1) & 15;
+				i++;
 			}
 
 			if (mask != 0x80)
@@ -824,4 +1125,3 @@ void GifDecoder::EmitLine(int y)
 
 	lineOutput.Commit();
 }
-

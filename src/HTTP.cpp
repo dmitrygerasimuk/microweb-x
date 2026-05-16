@@ -14,6 +14,7 @@ void HTTPRequest::Reset()
 	lineBufferSendPos = -1;
 	contentType[0] = '\0';
 	contentSize = 0;
+	bytesDownloaded = 0;
 }
 
 void HTTPRequest::WriteLine(const char* fmt, ...)
@@ -180,6 +181,7 @@ size_t HTTPRequest::ReadData(char* buffer, size_t count)
 			ResetTimeOutTimer();
 
 			int bytesRead = rc;
+			bytesDownloaded += bytesRead;
 			if (contentRemaining > 0)
 			{
 				contentRemaining -= bytesRead;

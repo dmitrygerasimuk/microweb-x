@@ -29,7 +29,7 @@
 #endif
 
 #define MAX_PAGE_HISTORY_BUFFER_SIZE MAX_URL_LENGTH
-#define APP_LOAD_BUFFER_SIZE 256
+#define APP_LOAD_BUFFER_SIZE 512
 #define UPDATE_TIME_SLICE (CLOCKS_PER_SEC / 5)		// 200ms time slices for rendering / parsing content buffers
 
 class HTTPRequest;
@@ -37,7 +37,7 @@ struct HTTPOptions;
 
 struct LoadTask
 {
-	LoadTask() : type(LocalFile), fs(NULL), debugDumpFile(NULL), downloadFile(NULL) {}
+	LoadTask() : type(LocalFile), fs(NULL), debugDumpFile(NULL), downloadFile(NULL), bytesDownloaded(0), contentSize(0), downloadComplete(false) {}
 
 	void Load(HTTPRequest::RequestType requestType, const char* url, HTTPOptions* options = NULL);
 	void Stop();
@@ -46,6 +46,9 @@ struct LoadTask
 	size_t GetContent(char* buffer, size_t count);
 	const char* GetURL();
 	const char* GetContentType();
+	long GetContentSize();
+	long GetBytesDownloaded();
+	bool IsDownloadComplete();
 
 	enum Type
 	{
@@ -64,6 +67,9 @@ struct LoadTask
 
 	FILE* debugDumpFile;
 	FILE* downloadFile;
+	long bytesDownloaded;
+	long contentSize;
+	bool downloadComplete;
 };
 
 struct Widget;
