@@ -45,6 +45,42 @@ struct URL
 		return *this;
 	}
 
+	static char LowerURLChar(char c)
+	{
+		return (c >= 'A' && c <= 'Z') ? c + ('a' - 'A') : c;
+	}
+
+	static bool IsAmpEscape(const char* text)
+	{
+		const char amp[] = "amp;";
+
+		if (text[0] != '&')
+		{
+			return false;
+		}
+
+		for (int n = 0; n < 4; n++)
+		{
+			if (!text[n + 1] || LowerURLChar(text[n + 1]) != amp[n])
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	static char* FindAmpEscape(char* text)
+	{
+		for (char* ptr = text; *ptr; ptr++)
+		{
+			if (IsAmpEscape(ptr))
+			{
+				return ptr;
+			}
+		}
+		return NULL;
+	}
+
 	void CleanUp()
 	{
 		// Replace back slashes with forward ones
@@ -91,9 +127,9 @@ struct URL
 
 		// Fix &amp escape sequences
 		char* match;
-		while (match = strstr(url, "&amp;"))
+		while (match = FindAmpEscape(url))
 		{
-			memmove(match + 1, match + 5, strlen(match + 1) - 3);
+			memmove(match + 1, match + 5, strlen(match + 5) + 1);
 		}
 	}
 
@@ -110,6 +146,7 @@ struct URL
 			if (!questionMarkLocation || protocolLocation < questionMarkLocation)
 			{
 				result = relativeURL;
+				result.CleanUp();
 				return result;
 			}
 		}
@@ -119,6 +156,7 @@ struct URL
 		{
 			strcpy(result.url, "http:");
 			strcpy(result.url + 5, relativeURL);
+			result.CleanUp();
 			return result;
 		}
 
@@ -135,6 +173,7 @@ struct URL
 			}
 
 			strcpy(result.url + strlen(result.url), relativeURL);
+			result.CleanUp();
 			return result;
 		}
 
