@@ -219,6 +219,9 @@ void AppInterface::Update()
 		case KEYCODE_PAGE_UP:
 			scrollDelta -= (windowRect.height - 24);
 			break;
+		case KEYCODE_SHIFT_SPACE:
+			scrollDelta -= (windowRect.height - 24);
+			break;
 		case KEYCODE_PAGE_DOWN:
 			scrollDelta += (windowRect.height - 24);
 			break;

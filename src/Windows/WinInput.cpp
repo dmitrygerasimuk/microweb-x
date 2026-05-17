@@ -29,6 +29,7 @@ void WindowsInputDriver::Init()
 	hCursorArrow = LoadCursor(NULL, IDC_ARROW);
 	hCursorTextSelect = LoadCursor(NULL, IDC_IBEAM);
 	currentMouseCursor = MouseCursor::Pointer;
+	skipNextSpaceChar = false;
 }
 
 void WindowsInputDriver::HideMouse()
@@ -146,12 +147,24 @@ void WindowsInputDriver::QueueKeyPress(WPARAM code)
 
 	if (translated)
 	{
+		if (translated == KEYCODE_SHIFT_SPACE)
+		{
+			skipNextSpaceChar = true;
+		}
 		inputQueue.push_back(translated);
 	}
 }
 
 void WindowsInputDriver::QueueCharPress(char code)
 {
+	if (skipNextSpaceChar && code == KEYCODE_SPACE)
+	{
+		skipNextSpaceChar = false;
+		return;
+	}
+
+	skipNextSpaceChar = false;
+
 	if (code >= 32 && code < 128)
 	{
 		inputQueue.push_back(code);
@@ -190,6 +203,11 @@ InputButtonCode WindowsInputDriver::TranslateCode(WPARAM code)
 		return KEYCODE_DELETE;
 	case VK_BACK:
 		return KEYCODE_BACKSPACE;
+	case VK_SPACE:
+		if (GetKeyState(VK_SHIFT) & 0x8000)
+			return KEYCODE_SHIFT_SPACE;
+		else
+			return 0;
 	case VK_TAB:
 		if (GetKeyState(VK_SHIFT) & 0x8000)
 			return KEYCODE_SHIFT_TAB;

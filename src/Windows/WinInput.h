@@ -41,5 +41,6 @@ private:
 	InputButtonCode TranslateCode(WPARAM code);
 
 	MouseCursor::Type currentMouseCursor;
+	bool skipNextSpaceChar;
 	std::vector<InputButtonCode> inputQueue;
 };

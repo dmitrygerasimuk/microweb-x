@@ -236,10 +236,19 @@ InputButtonCode DOSInputDriver::GetKeyPress()
 {
 	if (kbhit())
 	{
+		union REGS inreg, outreg;
+		inreg.h.ah = 2;
+		int86(0x16, &inreg, &outreg);
+		bool shiftPressed = (outreg.h.al & 0x03) != 0;
+
 		InputButtonCode keyPress = getch();
 		if (keyPress == 0)
 		{
 			keyPress = getch() << 8;
+		}
+		else if (keyPress == KEYCODE_SPACE && shiftPressed)
+		{
+			keyPress = KEYCODE_SHIFT_SPACE;
 		}
 		return keyPress;
 	}
