@@ -222,6 +222,9 @@ void AppInterface::Update()
 		case KEYCODE_PAGE_DOWN:
 			scrollDelta += (windowRect.height - 24);
 			break;
+		case KEYCODE_SPACE:
+			scrollDelta += (windowRect.height - 24);
+			break;
 		case KEYCODE_HOME:
 			ScrollAbsolute(0);
 			break;
