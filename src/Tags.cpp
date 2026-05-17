@@ -492,6 +492,10 @@ void FormTagHandler::Open(class HTMLParser& parser, char* attributeStr) const
 				{
 					formData->method = FormNode::Data::Post;
 				}
+				else if (!stricmp(attributes.Value(), "get"))
+				{
+					formData->method = FormNode::Data::Get;
+				}
 			}
 		}
 	}

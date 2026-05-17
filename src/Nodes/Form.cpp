@@ -1,4 +1,5 @@
 #include "Form.h"
+#include <string.h>
 #include "../Memory/Memory.h"
 #include "../App.h"
 #include "../Interface.h"
@@ -7,6 +8,65 @@
 #include "Select.h"
 
 #include "../HTTP.h"
+
+static bool IsFormUrlUnreserved(unsigned char c)
+{
+	return (c >= 'A' && c <= 'Z') ||
+		(c >= 'a' && c <= 'z') ||
+		(c >= '0' && c <= '9') ||
+		c == '-' || c == '_' || c == '.' || c == '~';
+}
+
+static bool AppendChar(char* buffer, char c, size_t bufferLength)
+{
+	size_t length = strlen(buffer);
+	if (length + 1 >= bufferLength)
+	{
+		return false;
+	}
+
+	buffer[length] = c;
+	buffer[length + 1] = '\0';
+	return true;
+}
+
+static void AppendUrlEncodedString(char* buffer, const char* value, size_t bufferLength)
+{
+	static const char hex[] = "0123456789ABCDEF";
+
+	if (!value)
+	{
+		return;
+	}
+
+	while (*value)
+	{
+		unsigned char c = (unsigned char)*value++;
+		if (IsFormUrlUnreserved(c))
+		{
+			if (!AppendChar(buffer, (char)c, bufferLength))
+			{
+				return;
+			}
+		}
+		else if (c == ' ')
+		{
+			if (!AppendChar(buffer, '+', bufferLength))
+			{
+				return;
+			}
+		}
+		else
+		{
+			if (!AppendChar(buffer, '%', bufferLength) ||
+				!AppendChar(buffer, hex[c >> 4], bufferLength) ||
+				!AppendChar(buffer, hex[c & 0x0f], bufferLength))
+			{
+				return;
+			}
+		}
+	}
+}
 
 FormNode::Data* FormNode::Construct(Allocator& allocator)
 {
@@ -18,22 +78,15 @@ void FormNode::AppendParameter(char* address, const char* name, const char* valu
 	if (!name)
 		return;
 
-	if (numParams == 0)
+	if (!AppendChar(address, numParams == 0 ? '?' : '&', bufferLength))
 	{
-		strncat(address, "?", bufferLength);
+		return;
 	}
-	else
-	{
-		strncat(address, "&", bufferLength);
-	}
-	strncat(address, name, bufferLength);
-	strncat(address, "=", bufferLength);
-	if (value)
-	{
-		strncat(address, value, bufferLength);
-	}
-	numParams++;
 
+	AppendUrlEncodedString(address, name, bufferLength);
+	AppendChar(address, '=', bufferLength);
+	AppendUrlEncodedString(address, value, bufferLength);
+	numParams++;
 }
 
 void FormNode::BuildAddressParameterList(Node* node, char* address, int& numParams, size_t bufferLength)
@@ -121,20 +174,14 @@ void FormNode::SubmitForm(Node* node)
 
 	BuildAddressParameterList(node, address.url, numParams, MAX_URL_LENGTH);
 
-	// Replace any spaces with +
-	for (char* p = paramStart; *p; p++)
-	{
-		if (*p == ' ')
-		{
-			*p = '+';
-		}
-	}
-
 	if (data->method == FormNode::Data::Post)
 	{
 		static HTTPOptions postOptions;
+		static char postContentData[MAX_URL_LENGTH];
 
-		postOptions.contentData = paramStart + 1;
+		strcpy(postContentData, paramStart[0] == '?' ? paramStart + 1 : "");
+
+		postOptions.contentData = postContentData;
 		postOptions.keepAlive = false;
 		postOptions.headerParams = NULL;
 		postOptions.postContentType = "application/x-www-form-urlencoded";
