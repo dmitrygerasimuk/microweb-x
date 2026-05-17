@@ -359,7 +359,8 @@ struct HTMLInputTag
 		Text,
 		CheckBox,
 		Radio,
-		Password
+		Password,
+		Hidden
 	};
 };
 
@@ -404,6 +405,10 @@ void InputTagHandler::Open(class HTMLParser& parser, char* attributeStr) const
 			{
 				type = HTMLInputTag::Password;
 			}
+			else if (!stricmp(attributes.Value(), "hidden"))
+			{
+				type = HTMLInputTag::Hidden;
+			}
 			else if (!stricmp(attributes.Value(), "checkbox"))
 			{
 				type = HTMLInputTag::CheckBox;
@@ -437,6 +442,15 @@ void InputTagHandler::Open(class HTMLParser& parser, char* attributeStr) const
 
 	switch (type)
 	{
+	case HTMLInputTag::Hidden:
+		{
+			HTMLParseContext* formContext = parser.FindContextInStack(Node::Form);
+			if (formContext)
+			{
+				FormNode::AddHiddenInput(formContext->node, name, value);
+			}
+		}
+		break;
 	case HTMLInputTag::Submit:
 		if (value)
 		{

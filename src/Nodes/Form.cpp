@@ -73,6 +73,40 @@ FormNode::Data* FormNode::Construct(Allocator& allocator)
 	return allocator.Alloc<FormNode::Data>();
 }
 
+void FormNode::AddHiddenInput(Node* formNode, char* name, char* value)
+{
+	if (!formNode || formNode->type != Node::Form || !name)
+	{
+		return;
+	}
+
+	FormNode::Data* formData = static_cast<FormNode::Data*>(formNode);
+	FormNode::Data::HiddenInput* input = MemoryManager::pageAllocator.Alloc<FormNode::Data::HiddenInput>();
+
+	if (!input)
+	{
+		return;
+	}
+
+	input->name = name;
+	input->value = value;
+	input->next = NULL;
+
+	if (!formData->hiddenInputs)
+	{
+		formData->hiddenInputs = input;
+	}
+	else
+	{
+		FormNode::Data::HiddenInput* last = formData->hiddenInputs;
+		while (last->next)
+		{
+			last = last->next;
+		}
+		last->next = input;
+	}
+}
+
 void FormNode::AppendParameter(char* address, const char* name, const char* value, int& numParams, size_t bufferLength)
 {
 	if (!name)
@@ -93,6 +127,16 @@ void FormNode::BuildAddressParameterList(Node* node, char* address, int& numPara
 {
 	switch(node->type)
 	{
+		case Node::Form:
+		{
+			FormNode::Data* formData = static_cast<FormNode::Data*>(node);
+
+			for (FormNode::Data::HiddenInput* input = formData->hiddenInputs; input; input = input->next)
+			{
+				AppendParameter(address, input->name, input->value, numParams, bufferLength);
+			}
+		}
+		break;
 		case Node::TextField:
 		{
 			TextFieldNode::Data* fieldData = static_cast<TextFieldNode::Data*>(node);

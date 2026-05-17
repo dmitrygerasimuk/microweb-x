@@ -17,13 +17,22 @@ public:
 			Get,
 			Post
 		};
+		struct HiddenInput
+		{
+			char* name;
+			char* value;
+			HiddenInput* next;
+		};
+
 		char* action;
 		MethodType method;
+		HiddenInput* hiddenInputs;
 
-		Data() : Node(Node::Form), action(NULL), method(Get) {}
+		Data() : Node(Node::Form), action(NULL), method(Get), hiddenInputs(NULL) {}
 	};
 
 	static FormNode::Data* Construct(Allocator& allocator);
+	static void AddHiddenInput(Node* formNode, char* name, char* value);
 
 	static void SubmitForm(Node* node);
 
