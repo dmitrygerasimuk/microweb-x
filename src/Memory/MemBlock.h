@@ -21,17 +21,17 @@ struct  MemBlockHandle
 		DiskSwap
 	};
 
-	Type type : 8;
+	uint8_t type;
 
-	MemBlockHandle() : type(Unallocated) {}
-	MemBlockHandle(void* buffer) : type(Conventional), conventionalPointer(buffer) {}
+	MemBlockHandle() : type((uint8_t)Unallocated) {}
+	MemBlockHandle(void* buffer) : type((uint8_t)Conventional), conventionalPointer(buffer) {}
 	void* GetPtr();
 	
 	template <typename T>
 	inline T Get() { return (T)GetPtr(); }
 	void Commit();
 
-	bool IsAllocated() { return type != Unallocated; }
+	bool IsAllocated() const { return type > (uint8_t)Unallocated && type <= (uint8_t)DiskSwap; }
 
 	union
 	{

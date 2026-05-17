@@ -15,9 +15,20 @@ EMSManager ems;
 XMSManager xms;
 #endif
 
+static void LogInvalidMemBlockHandle(const char* operation, MemBlockHandle* handle)
+{
+	const unsigned char* raw = (const unsigned char*)handle;
+	MemoryDebugLog("MEMBLOCK invalid-handle op=%s self=%p raw=%02x %02x %02x %02x %02x type=%u conv=%p swap=%ld emsPage=%u emsOff=%u xmsPtr=%lu xmsLen=%u",
+		operation, handle,
+		(unsigned)raw[0], (unsigned)raw[1], (unsigned)raw[2], (unsigned)raw[3], (unsigned)raw[4],
+		(unsigned)handle->type, handle->conventionalPointer, handle->swapFilePosition,
+		(unsigned)handle->emsPage, (unsigned)handle->emsPageOffset,
+		(unsigned long)handle->xmsPointer, (unsigned)handle->xmsLength);
+}
+
 void* MemBlockHandle::GetPtr()
 {
-	switch (type)
+	switch ((MemBlockHandle::Type)type)
 	{
 	case MemBlockHandle::Unallocated:
 		return nullptr;
@@ -38,18 +49,15 @@ void* MemBlockHandle::GetPtr()
 	}
 #endif
 	default:
-		MemoryDebugLog("MEMBLOCK invalid-handle type=%u conv=%p swap=%ld emsPage=%u emsOff=%u xmsPtr=%lu xmsLen=%u",
-			(unsigned)type, conventionalPointer, swapFilePosition,
-			(unsigned)emsPage, (unsigned)emsPageOffset,
-			(unsigned long)xmsPointer, (unsigned)xmsLength);
-		Platform::FatalError("Invalid pointer type: %d\n", type);
+		LogInvalidMemBlockHandle("get", this);
+		Platform::FatalError("Invalid pointer type: %u\n", (unsigned)type);
 		return nullptr;
 	}
 }
 
 void MemBlockHandle::Commit()
 {
-	switch (type)
+	switch ((MemBlockHandle::Type)type)
 	{
 	case MemBlockHandle::DiskSwap:
 		MemoryManager::pageBlockAllocator.CommitSwap(*this);
@@ -59,7 +67,16 @@ void MemBlockHandle::Commit()
 		xms.Commit(*this);
 		break;
 #endif
-
+	case MemBlockHandle::Unallocated:
+	case MemBlockHandle::Conventional:
+#ifdef __DOS__
+	case MemBlockHandle::EMS:
+#endif
+		break;
+	default:
+		LogInvalidMemBlockHandle("commit", this);
+		Platform::FatalError("Invalid pointer type: %u\n", (unsigned)type);
+		break;
 	}
 }
 
