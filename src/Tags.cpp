@@ -114,6 +114,26 @@ const HTMLTagHandler* DetermineTag(const char* str)
 	return &genericTag;
 }
 
+static void ApplyCharset(HTMLParser& parser, const char* charset)
+{
+	if (!stricmp(charset, "utf-8") || !stricmp(charset, "utf8"))
+	{
+		parser.SetTextEncoding(TextEncoding::UTF8);
+	}
+	else if (!stricmp(charset, "ISO-8859-1") || !stricmp(charset, "windows-1252"))
+	{
+		parser.SetTextEncoding(TextEncoding::ISO_8859_1);
+	}
+	else if (!stricmp(charset, "ISO-8859-2") || !stricmp(charset, "windows-1250"))
+	{
+		parser.SetTextEncoding(TextEncoding::ISO_8859_2);
+	}
+	else if (!stricmp(charset, "windows-1251") || !stricmp(charset, "cp1251") || !stricmp(charset, "cp-1251"))
+	{
+		parser.SetTextEncoding(TextEncoding::CP1251);
+	}
+}
+
 void HrTagHandler::Open(class HTMLParser& parser, char* attributeStr) const
 {
 	int padding = Assets.GetFont(1, FontStyle::Bold)->glyphHeight;
@@ -530,33 +550,11 @@ void MetaTagHandler::Open(class HTMLParser& parser, char* attributeStr) const
 	{
 		if (!stricmp(attributes.Key(), "charset"))
 		{
-			if (!stricmp(attributes.Value(), "utf-8"))
-			{
-				parser.SetTextEncoding(TextEncoding::UTF8);
-			}
-			else if (!stricmp(attributes.Value(), "ISO-8859-1") || !stricmp(attributes.Value(), "windows-1252"))
-			{
-				parser.SetTextEncoding(TextEncoding::ISO_8859_1);
-			}
-			else if (!stricmp(attributes.Value(), "ISO-8859-2") || !stricmp(attributes.Value(), "windows-1250"))
-			{
-				parser.SetTextEncoding(TextEncoding::ISO_8859_2);
-			}
+			ApplyCharset(parser, attributes.Value());
 		}
 		else if (!stricmp(attributes.Key(), "content"))
 		{
-			if (strstr(attributes.Value(), "charset=utf-8"))
-			{
-				parser.SetTextEncoding(TextEncoding::UTF8);
-			}
-			else if (strstr(attributes.Value(), "charset=ISO-8859-1") || strstr(attributes.Value(), "charset=windows-1252"))
-			{
-				parser.SetTextEncoding(TextEncoding::ISO_8859_1);
-			}
-			else if (strstr(attributes.Value(), "charset=ISO-8859-2") || strstr(attributes.Value(), "charset=windows-1250"))
-			{
-				parser.SetTextEncoding(TextEncoding::ISO_8859_2);
-			}
+			parser.SetContentType(attributes.Value());
 		}
 	}
 }

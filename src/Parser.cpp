@@ -509,9 +509,92 @@ void HTMLParser::FlushTextBuffer()
 	textBuffer[0] = '\0';
 }
 
+static bool IsUTF8Charset(const char* charset)
+{
+	return !stricmp(charset, "utf-8") || !stricmp(charset, "utf8");
+}
+
+static bool IsLatin1Charset(const char* charset)
+{
+	return !stricmp(charset, "ISO-8859-1") || !stricmp(charset, "Windows-1252");
+}
+
+static bool IsLatin2Charset(const char* charset)
+{
+	return !stricmp(charset, "ISO-8859-2") || !stricmp(charset, "Windows-1250");
+}
+
+static bool IsCP1251Charset(const char* charset)
+{
+	return !stricmp(charset, "Windows-1251") || !stricmp(charset, "CP1251") || !stricmp(charset, "CP-1251");
+}
+
+static const char* GetCyrillicTransliteration(int unicodePoint)
+{
+	static const char* upper[] =
+	{
+		"A", "B", "V", "G", "D", "E", "Zh", "Z",
+		"I", "Y", "K", "L", "M", "N", "O", "P",
+		"R", "S", "T", "U", "F", "Kh", "Ts", "Ch",
+		"Sh", "Sch", "", "Y", "", "E", "Yu", "Ya"
+	};
+	static const char* lower[] =
+	{
+		"a", "b", "v", "g", "d", "e", "zh", "z",
+		"i", "y", "k", "l", "m", "n", "o", "p",
+		"r", "s", "t", "u", "f", "kh", "ts", "ch",
+		"sh", "sch", "", "y", "", "e", "yu", "ya"
+	};
+
+	if (unicodePoint == 0x0401)
+	{
+		return "Yo";
+	}
+	if (unicodePoint == 0x0451)
+	{
+		return "yo";
+	}
+	if (unicodePoint >= 0x0410 && unicodePoint <= 0x042f)
+	{
+		return upper[unicodePoint - 0x0410];
+	}
+	if (unicodePoint >= 0x0430 && unicodePoint <= 0x044f)
+	{
+		return lower[unicodePoint - 0x0430];
+	}
+	return NULL;
+}
+
+static const char* GetCP1251String(unsigned char code)
+{
+	if (code == 0xa8)
+	{
+		return "Yo";
+	}
+	if (code == 0xb8)
+	{
+		return "yo";
+	}
+	if (code >= 0xc0 && code <= 0xdf)
+	{
+		return GetCyrillicTransliteration(0x0410 + code - 0xc0);
+	}
+	if (code >= 0xe0)
+	{
+		return GetCyrillicTransliteration(0x0430 + code - 0xe0);
+	}
+	return "?";
+}
+
 const char* HTMLParser::GetUnicodeString(int unicodePoint)
 {
 	TextEncodingPage* encodingPage = NULL;
+	const char* cyrillicText = GetCyrillicTransliteration(unicodePoint);
+
+	if (cyrillicText)
+	{
+		return cyrillicText;
+	}
 
 	if (unicodePoint >= 0x80 && unicodePoint <= 0xff)
 	{
@@ -754,6 +837,13 @@ void HTMLParser::Parse(char* buffer, size_t count)
 
 			case TextEncoding::ISO_8859_2:
 				for (const char* s = ISO_8859_2_Encoding.replacement[(unsigned char)c - 128]; s && *s; s++)
+				{
+					ParseChar(*s);
+				}
+				break;
+
+			case TextEncoding::CP1251:
+				for (const char* s = GetCP1251String((unsigned char)c); s && *s; s++)
 				{
 					ParseChar(*s);
 				}
@@ -1210,21 +1300,21 @@ bool HTMLParser::SetContentType(const char* contentType)
 	{
 		if (!stricmp(contentTypeParser.Key(), "charset"))
 		{
-			if (!stricmp(contentTypeParser.Value(), "utf-8"))
+			if (IsUTF8Charset(contentTypeParser.Value()))
 			{
 				SetTextEncoding(TextEncoding::UTF8);
 			}
-			else if (!stricmp(contentTypeParser.Value(), "ISO-8859-1"))
+			else if (IsLatin1Charset(contentTypeParser.Value()))
 			{
 				SetTextEncoding(TextEncoding::ISO_8859_1);
 			}
-			else if (!stricmp(contentTypeParser.Value(), "ISO-8859-2"))
+			else if (IsLatin2Charset(contentTypeParser.Value()))
 			{
 				SetTextEncoding(TextEncoding::ISO_8859_2);
 			}
-			else if (!stricmp(contentTypeParser.Value(), "Windows-1252"))
+			else if (IsCP1251Charset(contentTypeParser.Value()))
 			{
-				SetTextEncoding(TextEncoding::ISO_8859_1);
+				SetTextEncoding(TextEncoding::CP1251);
 			}
 		}
 		else if (!stricmp(contentTypeParser.Key(), "text/plain"))
