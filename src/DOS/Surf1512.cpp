@@ -514,7 +514,7 @@ void DrawSurface_4BPP_PC1512::BlitImage(DrawContext& context, Image* image, int 
 		// Blit the image data line by line
 		for (int j = 0; j < destHeight; j++)
 		{
-			MemBlockHandle* imageLines = image->lines.Get<MemBlockHandle*>();
+			MemBlockHandle* imageLines = image->lines.GetDebug<MemBlockHandle*>(__FILE__, __LINE__);
 			MemBlockHandle imageLine = imageLines[j + srcY];
 
 			for (int plane = 0; plane < 4; plane++)
@@ -522,7 +522,7 @@ void DrawSurface_4BPP_PC1512::BlitImage(DrawContext& context, Image* image, int 
 				SetPlaneRead(plane);
 				SetPlaneWriteMask(planeBits[plane]);
 
-				uint8_t* src = imageLine.Get<uint8_t*>() + (srcX >> 3);
+				uint8_t* src = imageLine.GetDebug<uint8_t*>(__FILE__, __LINE__) + (srcX >> 3);
 				uint8_t* dest = lines[y + j] + (x >> 3);
 				uint8_t srcMask = 0x80 >> (srcX & 7);
 				uint8_t destMask = 0x80 >> (x & 7);
@@ -562,7 +562,7 @@ void DrawSurface_4BPP_PC1512::BlitImage(DrawContext& context, Image* image, int 
 		// Blit the image data line by line
 		for (int j = 0; j < destHeight; j++)
 		{
-			MemBlockHandle* imageLines = image->lines.Get<MemBlockHandle*>();
+			MemBlockHandle* imageLines = image->lines.GetDebug<MemBlockHandle*>(__FILE__, __LINE__);
 			MemBlockHandle imageLine = imageLines[j + srcY];
 
 			for (int plane = 0; plane < 4; plane++)
@@ -571,7 +571,7 @@ void DrawSurface_4BPP_PC1512::BlitImage(DrawContext& context, Image* image, int 
 				uint8_t planeMask = planeBits[plane];
 				SetPlaneWriteMask(planeMask);
 
-				uint8_t* src = imageLine.Get<uint8_t*>() + (srcX >> 3);
+				uint8_t* src = imageLine.GetDebug<uint8_t*>(__FILE__, __LINE__) + (srcX >> 3);
 				uint8_t* dest = lines[y + j] + (x >> 3);
 				uint8_t destMask = 0x80 >> (x & 7);
 				uint8_t srcBuffer = (*src++);

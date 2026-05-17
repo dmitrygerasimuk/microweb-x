@@ -212,7 +212,7 @@ void JpegDecoder::Process(uint8_t* data, size_t dataLength)
 					return;
 				}
 
-				MemBlockHandle* lines = outputImage->lines.Get<MemBlockHandle*>();
+				MemBlockHandle* lines = outputImage->lines.GetDebug<MemBlockHandle*>(__FILE__, __LINE__);
 
 				for (int j = 0; j < outputImage->height; j++)
 				{
@@ -231,7 +231,7 @@ void JpegDecoder::Process(uint8_t* data, size_t dataLength)
 				outputImage->lines.Commit();
 				for (int j = 0; j < outputImage->height; j++)
 				{
-					lines = outputImage->lines.Get<MemBlockHandle*>();
+					lines = outputImage->lines.GetDebug<MemBlockHandle*>(__FILE__, __LINE__);
 					MemBlockHandle line = lines[j];
 					void* pixels = line.GetPtr();
 					if (pixels)
@@ -2272,9 +2272,9 @@ void JpegDecoder::BlitBlock()
 					{
 						const int8_t* ditherPattern = colourDitherMatrix + 4 * (by & 3);
 						int ditherIndex = 0;
-						MemBlockHandle* lines = outputImage->lines.Get<MemBlockHandle*>();
+						MemBlockHandle* lines = outputImage->lines.GetDebug<MemBlockHandle*>(__FILE__, __LINE__);
 						MemBlockHandle lineOutput = lines[outY + by + j];
-						uint8_t* output = lineOutput.Get<uint8_t*>();
+						uint8_t* output = lineOutput.GetDebug<uint8_t*>(__FILE__, __LINE__);
 						uint8_t* pDst = output + outX + i;
 
 						for (bx = 0; bx < bx_limit; bx++)
@@ -2347,9 +2347,9 @@ void JpegDecoder::BlitBlock()
 
 					for (int by = outY1; by < outY2; by++)
 					{
-						MemBlockHandle* lines = outputImage->lines.Get<MemBlockHandle*>();
+						MemBlockHandle* lines = outputImage->lines.GetDebug<MemBlockHandle*>(__FILE__, __LINE__);
 						MemBlockHandle lineOutput = lines[by];
-						uint8_t* pDst = lineOutput.Get<uint8_t*>() + outX1;
+						uint8_t* pDst = lineOutput.GetDebug<uint8_t*>(__FILE__, __LINE__) + outX1;
 
 						const int8_t* ditherPattern = colourDitherMatrix + 4 * (by & 3);
 
@@ -2419,9 +2419,9 @@ void JpegDecoder::BlitBlock()
 					for (by = 0; by < by_limit; by++)
 					{
 						const uint8_t* ditherPattern = greyDitherMatrix + 16 * (by & 15);
-						MemBlockHandle* lines = outputImage->lines.Get<MemBlockHandle*>();
+						MemBlockHandle* lines = outputImage->lines.GetDebug<MemBlockHandle*>(__FILE__, __LINE__);
 						MemBlockHandle lineOutput = lines[outY + by + j];
-						uint8_t* output = lineOutput.Get<uint8_t*>() + (outX >> 3);
+						uint8_t* output = lineOutput.GetDebug<uint8_t*>(__FILE__, __LINE__) + (outX >> 3);
 						uint8_t mask = 0x80;
 						uint8_t result = 0;
 
@@ -2492,9 +2492,9 @@ void JpegDecoder::BlitBlock()
 
 					for (int by = outY1; by < outY2; by++)
 					{
-						MemBlockHandle* lines = outputImage->lines.Get<MemBlockHandle*>();
+						MemBlockHandle* lines = outputImage->lines.GetDebug<MemBlockHandle*>(__FILE__, __LINE__);
 						MemBlockHandle lineOutput = lines[by];
-						uint8_t* line = lineOutput.Get<uint8_t*>();
+						uint8_t* line = lineOutput.GetDebug<uint8_t*>(__FILE__, __LINE__);
 
 						const uint8_t* ditherPattern = greyDitherMatrix + 16 * (by & 15);
 

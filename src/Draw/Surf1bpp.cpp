@@ -645,9 +645,9 @@ void DrawSurface_1BPP::BlitImage(DrawContext& context, Image* image, int x, int 
 	// Blit the image data line by line
 	for (int j = 0; j < destHeight; j++)
 	{
-		MemBlockHandle* imageLines = image->lines.Get<MemBlockHandle*>();
+		MemBlockHandle* imageLines = image->lines.GetDebug<MemBlockHandle*>(__FILE__, __LINE__);
 		MemBlockHandle imageLine = imageLines[j + srcY];
-		BlitMonoBits(imageLine.Get<uint8_t*>(), lines[y + j], srcX, x, destWidth, invertMask);
+		BlitMonoBits(imageLine.GetDebug<uint8_t*>(__FILE__, __LINE__), lines[y + j], srcX, x, destWidth, invertMask);
 	}
 }
 

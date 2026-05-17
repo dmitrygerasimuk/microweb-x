@@ -28,6 +28,11 @@ static void LogInvalidMemBlockHandle(const char* operation, MemBlockHandle* hand
 
 void* MemBlockHandle::GetPtr()
 {
+	return GetPtrDebug(nullptr, 0);
+}
+
+void* MemBlockHandle::GetPtrDebug(const char* file, unsigned line)
+{
 	switch ((MemBlockHandle::Type)type)
 	{
 	case MemBlockHandle::Unallocated:
@@ -50,6 +55,10 @@ void* MemBlockHandle::GetPtr()
 #endif
 	default:
 		LogInvalidMemBlockHandle("get", this);
+		if (file)
+		{
+			MemoryDebugLog("MEMBLOCK invalid-use file=%s line=%u", file, line);
+		}
 		Platform::FatalError("Invalid pointer type: %u\n", (unsigned)type);
 		return nullptr;
 	}
@@ -144,7 +153,7 @@ MemBlockHandle MemBlockAllocator::AllocString(const char* inString)
 	MemBlockHandle result = Allocate((uint16_t)strlen(inString) + 1);
 	if (result.IsAllocated())
 	{
-		strcpy(result.Get<char*>(), inString);
+		strcpy(result.GetDebug<char*>(__FILE__, __LINE__), inString);
 		result.Commit();
 	}
 	return result;

@@ -125,7 +125,7 @@ void GifDecoder::Process(uint8_t* data, size_t dataLength)
 						return;
 					}
 
-					MemBlockHandle* lines = outputImage->lines.Get<MemBlockHandle*>();
+					MemBlockHandle* lines = outputImage->lines.GetDebug<MemBlockHandle*>(__FILE__, __LINE__);
 
 					for (int j = 0; j < outputImage->height; j++)
 					{
@@ -145,7 +145,7 @@ void GifDecoder::Process(uint8_t* data, size_t dataLength)
 					outputImage->lines.Commit();
 					for (int j = 0; j < outputImage->height; j++)
 					{
-						lines = outputImage->lines.Get<MemBlockHandle*>();
+						lines = outputImage->lines.GetDebug<MemBlockHandle*>(__FILE__, __LINE__);
 						MemBlockHandle line = lines[j];
 						void* pixels = line.GetPtr();
 						if (pixels)
@@ -904,9 +904,9 @@ void GifDecoder::EmitLine(int y)
 		profileGenericScaleEmitLines++;
 	}
 #endif
-	MemBlockHandle* lines = outputImage->lines.Get<MemBlockHandle*>();
+	MemBlockHandle* lines = outputImage->lines.GetDebug<MemBlockHandle*>(__FILE__, __LINE__);
 	MemBlockHandle lineOutput = lines[y];
-	uint8_t* output = lineOutput.Get<uint8_t*>();
+	uint8_t* output = lineOutput.GetDebug<uint8_t*>(__FILE__, __LINE__);
 	
 	if (outputImage->bpp == 8)
 	{

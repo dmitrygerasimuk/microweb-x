@@ -417,7 +417,7 @@ bool PngDecoder::AllocateOutputImage()
 		return false;
 	}
 
-	lines = outputImage->lines.Get<MemBlockHandle*>();
+	lines = outputImage->lines.GetDebug<MemBlockHandle*>(__FILE__, __LINE__);
 	for (int y = 0; y < outputImage->height; y++)
 	{
 		lines[y] = MemoryManager::pageBlockAllocator.Allocate(outputImage->pitch);
@@ -431,9 +431,9 @@ bool PngDecoder::AllocateOutputImage()
 	outputImage->lines.Commit();
 	for (int y = 0; y < outputImage->height; y++)
 	{
-		lines = outputImage->lines.Get<MemBlockHandle*>();
+		lines = outputImage->lines.GetDebug<MemBlockHandle*>(__FILE__, __LINE__);
 		MemBlockHandle line = lines[y];
-		uint8_t* pixels = line.Get<uint8_t*>();
+		uint8_t* pixels = line.GetDebug<uint8_t*>(__FILE__, __LINE__);
 		if (pixels)
 		{
 			memset(pixels, outputImage->bpp == 1 ? 0xff : TRANSPARENT_COLOUR_VALUE, outputImage->pitch);
@@ -716,9 +716,9 @@ void PngDecoder::EmitSourceRow(uint8_t* sourceRow, uint16_t sourceY)
 
 void PngDecoder::EmitRow(uint8_t* sourceRow, int outputY)
 {
-	MemBlockHandle* lines = outputImage->lines.Get<MemBlockHandle*>();
+	MemBlockHandle* lines = outputImage->lines.GetDebug<MemBlockHandle*>(__FILE__, __LINE__);
 	MemBlockHandle lineOutput = lines[outputY];
-	uint8_t* output = lineOutput.Get<uint8_t*>();
+	uint8_t* output = lineOutput.GetDebug<uint8_t*>(__FILE__, __LINE__);
 
 	if (outputImage->bpp == 8)
 	{

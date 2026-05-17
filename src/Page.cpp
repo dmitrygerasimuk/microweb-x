@@ -140,7 +140,7 @@ void Page::DebugDumpNodeGraph(Node* node, int depth)
 			}
 			else
 			{
-				printf("<%s> [%d,%d:%d,%d] %s\n", nodeTypeNames[node->type], node->anchor.x, node->anchor.y, node->size.x, node->size.y, data->text.Get<char*>());
+				printf("<%s> [%d,%d:%d,%d] %s\n", nodeTypeNames[node->type], node->anchor.x, node->anchor.y, node->size.x, node->size.y, data->text.GetDebug<char*>(__FILE__, __LINE__));
 			}
 		}
 		break;
@@ -148,7 +148,7 @@ void Page::DebugDumpNodeGraph(Node* node, int depth)
 		{
 			TextElement::Data* data = static_cast<TextElement::Data*>(node->parent.Get());
 			SubTextElement::Data* subData = static_cast<SubTextElement::Data*>(node);
-			char* text = data->text.Get<char*>() + subData->startIndex;
+			char* text = data->text.GetDebug<char*>(__FILE__, __LINE__) + subData->startIndex;
 			char temp = text[subData->length];
 			text[subData->length] = 0;
 			printf("<%s> [%d,%d:%d,%d] %s\n", nodeTypeNames[node->type], node->anchor.x, node->anchor.y, node->size.x, node->size.y, text);

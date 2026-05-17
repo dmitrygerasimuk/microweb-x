@@ -409,11 +409,11 @@ void DrawSurface_2BPP::BlitImage(DrawContext& context, Image* image, int x, int 
 
 	if (image->bpp == 8)
 	{
-		MemBlockHandle* imageLines = image->lines.Get<MemBlockHandle*>();
+		MemBlockHandle* imageLines = image->lines.GetDebug<MemBlockHandle*>(__FILE__, __LINE__);
 		for (int j = 0; j < destHeight; j++)
 		{
 			MemBlockHandle imageLine = imageLines[j + srcY];
-			uint8_t* src = imageLine.Get<uint8_t*>() + srcX;
+			uint8_t* src = imageLine.GetDebug<uint8_t*>(__FILE__, __LINE__) + srcX;
 			uint8_t* dest = lines[y + j] + (x >> 2);
 			uint8_t destMask = bitmaskTable[x & 3];
 			uint8_t destBuffer = *dest;
@@ -505,11 +505,11 @@ void DrawSurface_2BPP::BlitImage(DrawContext& context, Image* image, int x, int 
 	}
 	else if (image->bpp == 1)
 	{
-		MemBlockHandle* imageLines = image->lines.Get<MemBlockHandle*>();
+		MemBlockHandle* imageLines = image->lines.GetDebug<MemBlockHandle*>(__FILE__, __LINE__);
 		for (int j = 0; j < destHeight; j++)
 		{
 			MemBlockHandle imageLine = imageLines[j + srcY];
-			uint8_t* src = imageLine.Get<uint8_t*>() + (srcX >> 3);
+			uint8_t* src = imageLine.GetDebug<uint8_t*>(__FILE__, __LINE__) + (srcX >> 3);
 			uint8_t* dest = lines[y + j] + (x >> 2);
 			uint8_t srcMask = 0x80 >> (srcX & 7);
 			uint8_t destMask = bitmaskTable[x & 3];

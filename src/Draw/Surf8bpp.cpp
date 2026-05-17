@@ -313,9 +313,9 @@ void DrawSurface_8BPP::BlitImage(DrawContext& context, Image* image, int x, int 
 		// Blit the image data line by line
 		for (int j = 0; j < destHeight; j++)
 		{
-			MemBlockHandle* imageLines = image->lines.Get<MemBlockHandle*>();
+			MemBlockHandle* imageLines = image->lines.GetDebug<MemBlockHandle*>(__FILE__, __LINE__);
 			MemBlockHandle imageLine = imageLines[srcY + j];
-			uint8_t* src = imageLine.Get<uint8_t*>() + srcX;
+			uint8_t* src = imageLine.GetDebug<uint8_t*>(__FILE__, __LINE__) + srcX;
 			uint8_t* destRow = lines[y + j] + x;
 
 			for (int i = 0; i < destWidth; i++)
@@ -335,9 +335,9 @@ void DrawSurface_8BPP::BlitImage(DrawContext& context, Image* image, int x, int 
 		// Blit the image data line by line
 		for (int j = 0; j < destHeight; j++)
 		{
-			MemBlockHandle* imageLines = image->lines.Get<MemBlockHandle*>();
+			MemBlockHandle* imageLines = image->lines.GetDebug<MemBlockHandle*>(__FILE__, __LINE__);
 			MemBlockHandle imageLine = imageLines[srcY + j];
-			uint8_t* src = imageLine.Get<uint8_t*>() + (srcX >> 3);
+			uint8_t* src = imageLine.GetDebug<uint8_t*>(__FILE__, __LINE__) + (srcX >> 3);
 			uint8_t srcMask = 0x80 >> (srcX & 7);
 			uint8_t* destRow = lines[y + j] + x;
 			uint8_t black = 0;

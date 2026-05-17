@@ -11,7 +11,7 @@ public:
 	public:
 		Data(MemBlockHandle& inURL) : Node(Node::Link), url(inURL) {}
 
-		const char* GetURL() { return url.Get<char*>(); }
+		const char* GetURL() { return url.GetDebug<char*>(__FILE__, __LINE__); }
 
 	private:
 		MemBlockHandle url;

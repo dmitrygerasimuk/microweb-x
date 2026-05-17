@@ -26,9 +26,12 @@ struct  MemBlockHandle
 	MemBlockHandle() : type((uint8_t)Unallocated) {}
 	MemBlockHandle(void* buffer) : type((uint8_t)Conventional), conventionalPointer(buffer) {}
 	void* GetPtr();
+	void* GetPtrDebug(const char* file, unsigned line);
 	
 	template <typename T>
 	inline T Get() { return (T)GetPtr(); }
+	template <typename T>
+	inline T GetDebug(const char* file, unsigned line) { return (T)GetPtrDebug(file, line); }
 	void Commit();
 
 	bool IsAllocated() const { return type > (uint8_t)Unallocated && type <= (uint8_t)DiskSwap; }
