@@ -3,6 +3,7 @@
 #include "../Platform.h"
 #include "../Colour.h"
 #include "../Memory/Memory.h"
+#include "../Memory/MemoryLog.h"
 #include "../Page.h"
 #include "../App.h"
 #include "../Draw/Surface.h"
@@ -231,6 +232,24 @@ void GifDecoder::Process(uint8_t* data, size_t dataLength)
 				if(FillStruct(&data, dataLength, &imageDescriptor, sizeof(ImageDescriptor)))
 				{
 					DEBUG_MESSAGE("Image: %d, %d %d, %d\n", imageDescriptor.x, imageDescriptor.y, imageDescriptor.width, imageDescriptor.height);
+					MemoryDebugLog("GIF descriptor x=%u y=%u w=%u h=%u screen=%ux%u output=%ux%u interlace=%u",
+						(unsigned)imageDescriptor.x, (unsigned)imageDescriptor.y,
+						(unsigned)imageDescriptor.width, (unsigned)imageDescriptor.height,
+						(unsigned)header.width, (unsigned)header.height,
+						(unsigned)outputImage->width, (unsigned)outputImage->height,
+						(unsigned)((imageDescriptor.fields & GIF_INTERLACE_BIT) ? 1 : 0));
+					if (imageDescriptor.width == 0 || imageDescriptor.height == 0)
+					{
+						state = ImageDecoder::Error;
+						GIF_PROFILE_FINISH("bad-descriptor");
+						return;
+					}
+
+					lineBufferDivider = 1;
+					while (imageDescriptor.width / lineBufferDivider > GIF_LINE_BUFFER_MAX_SIZE)
+					{
+						lineBufferDivider++;
+					}
 					
 					drawX = drawY = 0;
 					outputLine = 0;
@@ -799,7 +818,7 @@ int GifDecoder::CalculateLineIndex(int y)
     int h;
     int p;
 
-    h = header.height;
+    h = imageDescriptor.height;
 
     /*
        pass 1: 0, 8, 16, ...
@@ -842,20 +861,34 @@ void GifDecoder::ProcessLineBuffer()
 #if GIF_PROFILE
 	profileProcessLines++;
 #endif
-	int outputY = linesProcessed;
+	if (linesProcessed >= imageDescriptor.height)
+	{
+		MemoryDebugLog("GIF skip-extra-line line=%d descH=%u screenH=%u outputH=%u",
+			linesProcessed, (unsigned)imageDescriptor.height,
+			(unsigned)header.height, (unsigned)outputImage->height);
+		linesProcessed++;
+		return;
+	}
+
+	int outputY = imageDescriptor.y + linesProcessed;
+	int sourceHeight = header.height;
+	if (sourceHeight <= 0)
+	{
+		sourceHeight = imageDescriptor.height;
+	}
 	
 	if (imageDescriptor.fields & GIF_INTERLACE_BIT)
 	{
-		outputY = CalculateLineIndex(linesProcessed);
+		outputY = imageDescriptor.y + CalculateLineIndex(linesProcessed);
 
-		if (outputImage->height == header.height)
+		if (outputImage->height == sourceHeight)
 		{
 			EmitLine(outputY);
 		}
 		else
 		{
-			int first = outputY * (long)outputImage->height / header.height;
-			int last = (outputY + 1) * (long)outputImage->height / header.height;
+			int first = outputY * (long)outputImage->height / sourceHeight;
+			int last = (outputY + 1) * (long)outputImage->height / sourceHeight;
 
 			for (int y = first; y < last; y++)
 			{
@@ -863,7 +896,7 @@ void GifDecoder::ProcessLineBuffer()
 			}
 		}
 	}
-	else if (outputImage->height == header.height)
+	else if (outputImage->height == sourceHeight)
 	{
 		EmitLine(outputY);
 		linesDecoded = outputY + 1;
@@ -871,14 +904,14 @@ void GifDecoder::ProcessLineBuffer()
 	else
 	{
 		verticalScaleError += outputImage->height;
-		while (verticalScaleError >= header.height)
+		while (verticalScaleError >= sourceHeight)
 		{
 			if (nextScaledOutputY < outputImage->height)
 			{
 				EmitLine(nextScaledOutputY);
 			}
 			nextScaledOutputY++;
-			verticalScaleError -= header.height;
+			verticalScaleError -= sourceHeight;
 		}
 		linesDecoded = nextScaledOutputY;
 	}
@@ -888,6 +921,14 @@ void GifDecoder::ProcessLineBuffer()
 
 void GifDecoder::EmitLine(int y)
 {
+	if (y < 0 || y >= outputImage->height)
+	{
+		MemoryDebugLog("GIF emit skip-y y=%d outputH=%u descH=%u screenH=%u processed=%d",
+			y, (unsigned)outputImage->height, (unsigned)imageDescriptor.height,
+			(unsigned)header.height, linesProcessed);
+		return;
+	}
+
 #if GIF_PROFILE
 	profileEmitLines++;
 	profileEmitPixels += (unsigned long)outputImage->width;
@@ -906,6 +947,17 @@ void GifDecoder::EmitLine(int y)
 #endif
 	MemBlockHandle* lines = outputImage->lines.GetDebug<MemBlockHandle*>(__FILE__, __LINE__);
 	MemBlockHandle lineOutput = lines[y];
+	if (!lineOutput.IsAllocated())
+	{
+		const unsigned char* raw = (const unsigned char*)&lineOutput;
+		MemoryDebugLog("GIF emit bad-line y=%d outputH=%u descH=%u screenH=%u processed=%d raw=%02x %02x %02x %02x %02x type=%u",
+			y, (unsigned)outputImage->height, (unsigned)imageDescriptor.height,
+			(unsigned)header.height, linesProcessed,
+			(unsigned)raw[0], (unsigned)raw[1], (unsigned)raw[2], (unsigned)raw[3], (unsigned)raw[4],
+			(unsigned)lineOutput.type);
+		return;
+	}
+
 	uint8_t* output = lineOutput.GetDebug<uint8_t*>(__FILE__, __LINE__);
 	
 	if (outputImage->bpp == 8)
