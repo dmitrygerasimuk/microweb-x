@@ -21,9 +21,7 @@ void EMSManager::Init()
     if(memcmp(emm, "EMMXXXX0", 8))
     {
         // No EMS present
-#if MEMORY_DEBUG_LOG
         MemoryDebugLog("EMS init unavailable");
-#endif
         return;
     }
 
@@ -32,9 +30,7 @@ void EMSManager::Init()
     int86(EMS_INTERRUPT_NUMBER, &inregs, &outregs);
     if ((outregs.h.al & 0xf0) < 0x40) {
         // Incorrect version
-#if MEMORY_DEBUG_LOG
         MemoryDebugLog("EMS init bad-version raw=%u", (unsigned)outregs.h.al);
-#endif
         return;
     }
 
@@ -56,9 +52,7 @@ void EMSManager::Init()
     if (outregs.h.ah)
     {
         // Allocation failed
-#if MEMORY_DEBUG_LOG
         MemoryDebugLog("EMS init alloc-fail pages=%d error=%u", numAvailablePages, (unsigned)outregs.h.ah);
-#endif
         return;
     }
 
@@ -75,16 +69,12 @@ void EMSManager::Init()
     nextPageToMap = 0;
 
     isAvailable = true;
-#if MEMORY_DEBUG_LOG
     MemoryDebugLog("EMS init ok pages=%d handle=%u frame=%04x", numAllocatedPages, (unsigned)allocationHandle, (unsigned)pageAddressSegment);
-#endif
 }
 
 void EMSManager::Reset()
 {
-#if MEMORY_DEBUG_LOG
     MemoryDebugLog("EMS reset used=%ld/%ld page=%d off=%u", TotalUsed(), TotalAllocated(), allocationPageIndex, (unsigned)allocationPageUsed);
-#endif
     allocationPageIndex = 0;
     allocationPageUsed = 0;
 }
@@ -93,18 +83,14 @@ void EMSManager::Shutdown()
 {
     if (isAvailable)
     {
-#if MEMORY_DEBUG_LOG
         MemoryDebugLog("EMS shutdown/free handle=%u used=%ld/%ld", (unsigned)allocationHandle, TotalUsed(), TotalAllocated());
-#endif
         union REGS inregs, outregs;
 
         // Free allocated pages
         inregs.h.ah = 0x45;
         inregs.x.dx = allocationHandle;
         int86(EMS_INTERRUPT_NUMBER, &inregs, &outregs);
-#if MEMORY_DEBUG_LOG
         MemoryDebugLog("EMS shutdown/free done handle=%u error=%u", (unsigned)allocationHandle, (unsigned)outregs.h.ah);
-#endif
 
         isAvailable = false;
         numAllocatedPages = 0;

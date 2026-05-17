@@ -118,14 +118,10 @@ void XMSManager::Init()
 
                     buffer = malloc(XMS_BUFFER_SIZE);
                     isAvailable = buffer != NULL;
-#if MEMORY_DEBUG_LOG
                     MemoryDebugLog("XMS init ok handle=%u total=%ld buffer=%p", (unsigned)allocationHandle, totalAllocated, buffer);
-#endif
                     if (!isAvailable)
                     {
-#if MEMORY_DEBUG_LOG
                         MemoryDebugLog("XMS init buffer-fail/free handle=%u", (unsigned)allocationHandle);
-#endif
                         XMSFree(allocationHandle);
                         allocationHandle = 0;
                         totalAllocated = 0;
@@ -168,19 +164,15 @@ void XMSManager::Init()
             }
         }
     }
-#if MEMORY_DEBUG_LOG
     if (!isAvailable)
     {
         MemoryDebugLog("XMS init unavailable");
     }
-#endif
 }
 
 void XMSManager::Reset()
 {
-#if MEMORY_DEBUG_LOG
     MemoryDebugLog("XMS reset used=%ld/%ld", totalUsed, totalAllocated);
-#endif
     totalUsed = 0;
 }
 
@@ -189,13 +181,9 @@ void XMSManager::Shutdown()
     if (isAvailable)
     {
         uint16_t handle = allocationHandle;
-#if MEMORY_DEBUG_LOG
         MemoryDebugLog("XMS shutdown/free handle=%u used=%ld/%ld buffer=%p", (unsigned)handle, totalUsed, totalAllocated, buffer);
-#endif
         XMSFree(handle);
-#if MEMORY_DEBUG_LOG
         MemoryDebugLog("XMS shutdown/free done handle=%u", (unsigned)handle);
-#endif
     }
 
     if (buffer)

@@ -82,6 +82,7 @@ struct AppConfig
 	bool useSwap : 1;
 	bool useEMS : 1;
 	bool useXMS : 1;
+	bool debugMemoryLog : 1;
 };
 
 class App

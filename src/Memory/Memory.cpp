@@ -29,9 +29,39 @@ LinearAllocator MemoryManager::pageAllocator;
 MallocWrapper MemoryManager::interfaceAllocator;
 MemBlockAllocator MemoryManager::pageBlockAllocator;
 
-#if MEMORY_DEBUG_LOG
+static bool memoryDebugLogEnabled = false;
+
+void MemoryDebugLogSetEnabled(bool enabled)
+{
+	memoryDebugLogEnabled = enabled;
+
+	if (enabled)
+	{
+		FILE* file = fopen("C:\\MEMLOG.TXT", "w");
+		if (!file)
+		{
+			file = fopen("MEMLOG.TXT", "w");
+		}
+		if (file)
+		{
+			fprintf(file, "MEMLOG enabled\n");
+			fclose(file);
+		}
+	}
+}
+
+bool MemoryDebugLogIsEnabled()
+{
+	return memoryDebugLogEnabled;
+}
+
 void MemoryDebugLog(const char* fmt, ...)
 {
+	if (!memoryDebugLogEnabled)
+	{
+		return;
+	}
+
 	FILE* file = fopen("C:\\MEMLOG.TXT", "a");
 	if (!file)
 	{
@@ -50,7 +80,6 @@ void MemoryDebugLog(const char* fmt, ...)
 	fprintf(file, "\n");
 	fclose(file);
 }
-#endif
 
 void MemoryManager::GenerateMemoryReport(char* outString)
 {

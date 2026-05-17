@@ -18,6 +18,7 @@
 #include "Platform.h"
 #include "HTTP.h"
 #include "Image/Decoder.h"
+#include "Memory/MemoryLog.h"
 
 App* App::app;
 AppConfig App::config;
@@ -92,6 +93,7 @@ void App::Run(int argc, char* argv[])
 	config.useSwap = false;
 	config.useEMS = true;
 	config.useXMS = true;
+	config.debugMemoryLog = false;
 
 	if (argc > 1)
 	{
@@ -99,8 +101,10 @@ void App::Run(int argc, char* argv[])
 		{
 			if (*argv[n] != '-')
 			{
-				targetURL = argv[n];
-				break;
+				if (!targetURL)
+				{
+					targetURL = argv[n];
+				}
 			}
 			else if (!stricmp(argv[n], "-noimages"))
 			{
@@ -126,9 +130,14 @@ void App::Run(int argc, char* argv[])
 			{
 				config.useXMS = false;
 			}
+			else if (!stricmp(argv[n], "-debug") || !stricmp(argv[n], "-debugmem") || !stricmp(argv[n], "-memlog"))
+			{
+				config.debugMemoryLog = true;
+			}
 		}
 	}
 
+	MemoryDebugLogSetEnabled(config.debugMemoryLog);
 	MemoryManager::pageBlockAllocator.Init();
 
 	if (config.loadImages)
