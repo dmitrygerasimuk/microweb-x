@@ -96,7 +96,7 @@ void AppInterface::Update()
 	if (Platform::input->GetMouseButtonPress(clickX, clickY))
 	{
 		hoverNode = PickNode(clickX, clickY);
-		HandleClick(mouseX, mouseY);
+		HandleClick(clickX, clickY);
 	}
 
 	if ((buttons & 1) && (oldButtons & 1) && (mouseX != oldMouseX || mouseY != oldMouseY))

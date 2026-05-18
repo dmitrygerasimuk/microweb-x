@@ -156,8 +156,8 @@ bool SelectNode::HandleEvent(Node* node, const Event& event)
 		{
 			if (node == dropDownMenu.activeNode)
 			{
-				int clickX = event.x + ui.GetScrollPositionX();
-				int clickY = event.y + ui.GetScrollPositionY() - ui.windowRect.y;
+				int clickX = event.x;
+				int clickY = event.y;
 				if (node->IsPointInsideNode(clickX, clickY))
 				{
 					ui.FocusNode(nullptr);
