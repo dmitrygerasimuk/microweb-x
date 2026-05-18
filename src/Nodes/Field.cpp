@@ -181,23 +181,12 @@ bool TextFieldNode::HandleEvent(Node* node, const Event& event)
 		return true;
 	case Event::Unfocus:
 		pickedPosition = -1;
-		if (shiftPosition > 0)
+		if (shiftPosition > 0 || selectionLength > 0 || cursorPosition >= 0)
 		{
 			shiftPosition = 0;
 			selectionLength = 0;
 			cursorPosition = -1;
 			node->Redraw();
-		}
-		else
-		{
-			if (selectionLength > 0)
-			{
-				DrawSelection(context, node);
-			}
-			else
-			{
-				DrawCursor(context, node);
-			}
 		}
 		DrawHighlight(node, Platform::video->colourScheme.pageColour);
 		return true;
@@ -219,15 +208,6 @@ bool TextFieldNode::HandleEvent(Node* node, const Event& event)
 			int releasedPickPosition = PickPosition(node, event.x, event.y);
 			if (pickedPosition != releasedPickPosition)
 			{
-				if (selectionLength > 0)
-				{
-					DrawSelection(context, node);
-				}
-				else
-				{
-					DrawCursor(context, node);
-				}
-
 				if (pickedPosition > releasedPickPosition)
 				{
 					selectionStartPosition = releasedPickPosition;
@@ -239,7 +219,7 @@ bool TextFieldNode::HandleEvent(Node* node, const Event& event)
 					selectionLength = releasedPickPosition - pickedPosition;
 				}
 
-				DrawSelection(context, node);
+				node->Redraw();
 			}
 		}
 		//cursorPosition = -1;
@@ -440,11 +420,63 @@ void TextFieldNode::DrawSelection(DrawContext& context, Node* node)
 	TextFieldNode::Data* data = static_cast<TextFieldNode::Data*>(node);
 
 	Font* font = node->GetStyleFont();
-	int selectionX1 = GetBufferPixelWidth(node, shiftPosition, selectionStartPosition);
-	int selectionX2 = GetBufferPixelWidth(node, shiftPosition, selectionStartPosition + selectionLength);
+	int selectionStart = selectionStartPosition;
+	int selectionEnd = selectionStartPosition + selectionLength;
+	int bufferLength = (int)strlen(data->buffer);
+
+	if (selectionLength <= 0 || selectionEnd <= shiftPosition || selectionStart >= bufferLength)
+	{
+		return;
+	}
+
+	if (selectionStart < shiftPosition)
+	{
+		selectionStart = shiftPosition;
+	}
+	if (selectionEnd > bufferLength)
+	{
+		selectionEnd = bufferLength;
+	}
+
+	int selectionX1 = GetBufferPixelWidth(node, shiftPosition, selectionStart);
+	int selectionX2 = GetBufferPixelWidth(node, shiftPosition, selectionEnd);
+	if (selectionX2 <= selectionX1)
+	{
+		return;
+	}
+
+	DrawContext selectionContext = context;
+	int fieldClipLeft = node->anchor.x + 1;
+	int fieldClipRight = node->anchor.x + node->size.x - 2;
+	if (selectionContext.clipLeft < fieldClipLeft)
+	{
+		selectionContext.clipLeft = fieldClipLeft;
+	}
+	if (selectionContext.clipRight > fieldClipRight)
+	{
+		selectionContext.clipRight = fieldClipRight;
+	}
 
 	Platform::input->HideMouse();
-	context.surface->InvertRect(context, selectionX1 + node->anchor.x + LEFT_PADDING, node->anchor.y + 2, selectionX2 - selectionX1, font->glyphHeight);
+	int x = selectionX1 + node->anchor.x + LEFT_PADDING;
+	int y = node->anchor.y + 2;
+	uint8_t selectedTextColour = Platform::video->colourScheme.pageColour;
+	uint8_t selectedBackColour = Platform::video->colourScheme.textColour;
+
+	selectionContext.surface->FillRect(selectionContext, x, y, selectionX2 - selectionX1, font->glyphHeight, selectedBackColour);
+
+	char* selectedText = data->buffer + selectionStart;
+	char savedChar = data->buffer[selectionEnd];
+	data->buffer[selectionEnd] = '\0';
+	if (data->isPassword)
+	{
+		DrawPasswordString(selectionContext, font, selectedText, x, y, selectedTextColour);
+	}
+	else
+	{
+		selectionContext.surface->DrawString(selectionContext, font, selectedText, x, y, selectedTextColour, node->GetStyle().fontStyle);
+	}
+	data->buffer[selectionEnd] = savedChar;
 	Platform::input->ShowMouse();
 }
 
@@ -523,12 +555,8 @@ void TextFieldNode::ClearSelection(Node* node)
 {
 	if (selectionLength > 0)
 	{
-		DrawContext context;
-		App::Get().pageRenderer.GenerateDrawContext(context, node);
-
-		DrawSelection(context, node);
 		selectionLength = 0;
-		DrawCursor(context, node);
+		node->Redraw();
 	}
 }
 
