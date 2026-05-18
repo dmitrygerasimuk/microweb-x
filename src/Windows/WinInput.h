@@ -34,7 +34,7 @@ public:
 	void RefreshCursor();
 	virtual InputButtonCode GetKeyPress();
 
-	void QueueCharPress(char code);
+	void QueueCharPress(WPARAM code);
 	void QueueKeyPress(WPARAM code);
 
 private:

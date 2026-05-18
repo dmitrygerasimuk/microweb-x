@@ -136,7 +136,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg,
 		break;
 
 	case WM_CHAR:
-		winInputDriver.QueueCharPress((char)wParam);
+		winInputDriver.QueueCharPress(wParam);
 		break;
 
 	case WM_MOUSEWHEEL:

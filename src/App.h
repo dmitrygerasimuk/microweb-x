@@ -83,6 +83,7 @@ struct AppConfig
 	bool useEMS : 1;
 	bool useXMS : 1;
 	bool debugMemoryLog : 1;
+	bool transliterateCyrillic : 1;
 };
 
 class App

@@ -529,6 +529,11 @@ static bool IsCP1251Charset(const char* charset)
 	return !stricmp(charset, "Windows-1251") || !stricmp(charset, "CP1251") || !stricmp(charset, "CP-1251");
 }
 
+static bool IsCP866Charset(const char* charset)
+{
+	return !stricmp(charset, "CP866") || !stricmp(charset, "CP-866") || !stricmp(charset, "IBM866") || !stricmp(charset, "866");
+}
+
 static const char* GetCyrillicTransliteration(int unicodePoint)
 {
 	static const char* upper[] =
@@ -565,8 +570,67 @@ static const char* GetCyrillicTransliteration(int unicodePoint)
 	return NULL;
 }
 
+static int UnicodeToCP1251(int unicodePoint)
+{
+	if (unicodePoint == 0x0401)
+	{
+		return 0xa8;
+	}
+	if (unicodePoint == 0x0451)
+	{
+		return 0xb8;
+	}
+	if (unicodePoint >= 0x0410 && unicodePoint <= 0x042f)
+	{
+		return 0xc0 + unicodePoint - 0x0410;
+	}
+	if (unicodePoint >= 0x0430 && unicodePoint <= 0x044f)
+	{
+		return 0xe0 + unicodePoint - 0x0430;
+	}
+	return -1;
+}
+
+static int CP866ToUnicode(unsigned char code)
+{
+	if (code >= 0x80 && code <= 0x9f)
+	{
+		return 0x0410 + code - 0x80;
+	}
+	if (code >= 0xa0 && code <= 0xaf)
+	{
+		return 0x0430 + code - 0xa0;
+	}
+	if (code >= 0xe0 && code <= 0xef)
+	{
+		return 0x0440 + code - 0xe0;
+	}
+	if (code == 0xf0)
+	{
+		return 0x0401;
+	}
+	if (code == 0xf1)
+	{
+		return 0x0451;
+	}
+	return -1;
+}
+
+static const char* GetSingleByteString(unsigned char code)
+{
+	static char buffer[2];
+	buffer[0] = (char)code;
+	buffer[1] = '\0';
+	return buffer;
+}
+
 static const char* GetCP1251String(unsigned char code)
 {
+	if (!App::config.transliterateCyrillic)
+	{
+		return GetSingleByteString(code);
+	}
+
 	if (code == 0xa8)
 	{
 		return "Yo";
@@ -586,14 +650,39 @@ static const char* GetCP1251String(unsigned char code)
 	return "?";
 }
 
+static const char* GetCP866String(unsigned char code)
+{
+	int unicodePoint = CP866ToUnicode(code);
+	if (unicodePoint >= 0)
+	{
+		if (App::config.transliterateCyrillic)
+		{
+			return GetCyrillicTransliteration(unicodePoint);
+		}
+
+		return GetSingleByteString((unsigned char)UnicodeToCP1251(unicodePoint));
+	}
+
+	return App::config.transliterateCyrillic ? "?" : GetSingleByteString(code);
+}
+
 const char* HTMLParser::GetUnicodeString(int unicodePoint)
 {
 	TextEncodingPage* encodingPage = NULL;
-	const char* cyrillicText = GetCyrillicTransliteration(unicodePoint);
+	const char* cyrillicText = NULL;
+	int cp1251Code = UnicodeToCP1251(unicodePoint);
 
-	if (cyrillicText)
+	if (cp1251Code >= 0)
 	{
-		return cyrillicText;
+		if (App::config.transliterateCyrillic)
+		{
+			cyrillicText = GetCyrillicTransliteration(unicodePoint);
+			if (cyrillicText)
+			{
+				return cyrillicText;
+			}
+		}
+		return GetSingleByteString((unsigned char)cp1251Code);
 	}
 
 	if (unicodePoint >= 0x80 && unicodePoint <= 0xff)
@@ -844,6 +933,13 @@ void HTMLParser::Parse(char* buffer, size_t count)
 
 			case TextEncoding::CP1251:
 				for (const char* s = GetCP1251String((unsigned char)c); s && *s; s++)
+				{
+					ParseChar(*s);
+				}
+				break;
+
+			case TextEncoding::CP866:
+				for (const char* s = GetCP866String((unsigned char)c); s && *s; s++)
 				{
 					ParseChar(*s);
 				}
@@ -1315,6 +1411,10 @@ bool HTMLParser::SetContentType(const char* contentType)
 			else if (IsCP1251Charset(contentTypeParser.Value()))
 			{
 				SetTextEncoding(TextEncoding::CP1251);
+			}
+			else if (IsCP866Charset(contentTypeParser.Value()))
+			{
+				SetTextEncoding(TextEncoding::CP866);
 			}
 		}
 		else if (!stricmp(contentTypeParser.Key(), "text/plain"))

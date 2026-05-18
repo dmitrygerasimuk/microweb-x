@@ -246,7 +246,7 @@ bool TextFieldNode::HandleEvent(Node* node, const Event& event)
 		break;
 	case Event::KeyPress:
 		pickedPosition = -1;
-		if (event.key >= 32 && event.key < 128)
+		if (event.key >= 32 && event.key <= 255)
 		{
 			if (selectionLength > 0)
 			{

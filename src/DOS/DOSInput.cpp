@@ -24,6 +24,31 @@
 #include "../Draw/Surface.h"
 #include "../VidModes.h"
 
+static uint8_t RemapCP866ToCP1251(uint8_t code)
+{
+	if (code >= 0x80 && code <= 0x9f)
+	{
+		return (uint8_t)(0xc0 + code - 0x80);
+	}
+	if (code >= 0xa0 && code <= 0xaf)
+	{
+		return (uint8_t)(0xe0 + code - 0xa0);
+	}
+	if (code >= 0xe0 && code <= 0xef)
+	{
+		return (uint8_t)(0xf0 + code - 0xe0);
+	}
+	if (code == 0xf0)
+	{
+		return 0xa8;
+	}
+	if (code == 0xf1)
+	{
+		return 0xb8;
+	}
+	return code;
+}
+
 void DOSInputDriver::Init()
 {
 	union REGS inreg, outreg;
@@ -249,6 +274,10 @@ InputButtonCode DOSInputDriver::GetKeyPress()
 		else if (keyPress == KEYCODE_SPACE && shiftPressed)
 		{
 			keyPress = KEYCODE_SHIFT_SPACE;
+		}
+		else if (keyPress >= 0x80 && keyPress <= 0xff)
+		{
+			keyPress = RemapCP866ToCP1251((uint8_t)keyPress);
 		}
 		return keyPress;
 	}

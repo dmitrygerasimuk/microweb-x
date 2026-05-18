@@ -23,6 +23,27 @@ static HCURSOR  hCursorHand;
 static HCURSOR  hCursorArrow;
 static HCURSOR  hCursorTextSelect;
 
+static int UnicodeToCP1251(WPARAM code)
+{
+	if (code == 0x0401)
+	{
+		return 0xa8;
+	}
+	if (code == 0x0451)
+	{
+		return 0xb8;
+	}
+	if (code >= 0x0410 && code <= 0x042f)
+	{
+		return 0xc0 + (int)code - 0x0410;
+	}
+	if (code >= 0x0430 && code <= 0x044f)
+	{
+		return 0xe0 + (int)code - 0x0430;
+	}
+	return -1;
+}
+
 void WindowsInputDriver::Init()
 {
 	hCursorHand = LoadCursor(NULL, IDC_HAND);
@@ -155,7 +176,7 @@ void WindowsInputDriver::QueueKeyPress(WPARAM code)
 	}
 }
 
-void WindowsInputDriver::QueueCharPress(char code)
+void WindowsInputDriver::QueueCharPress(WPARAM code)
 {
 	if (skipNextSpaceChar && code == KEYCODE_SPACE)
 	{
@@ -165,9 +186,14 @@ void WindowsInputDriver::QueueCharPress(char code)
 
 	skipNextSpaceChar = false;
 
-	if (code >= 32 && code < 128)
+	int cp1251Code = UnicodeToCP1251(code);
+	if (cp1251Code >= 0)
 	{
-		inputQueue.push_back(code);
+		inputQueue.push_back((InputButtonCode)cp1251Code);
+	}
+	else if (code >= 32 && code <= 255)
+	{
+		inputQueue.push_back((InputButtonCode)code);
 	}
 }
 

@@ -132,6 +132,10 @@ static void ApplyCharset(HTMLParser& parser, const char* charset)
 	{
 		parser.SetTextEncoding(TextEncoding::CP1251);
 	}
+	else if (!stricmp(charset, "cp866") || !stricmp(charset, "cp-866") || !stricmp(charset, "ibm866") || !stricmp(charset, "866"))
+	{
+		parser.SetTextEncoding(TextEncoding::CP866);
+	}
 }
 
 void HrTagHandler::Open(class HTMLParser& parser, char* attributeStr) const

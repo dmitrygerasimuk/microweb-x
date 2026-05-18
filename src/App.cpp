@@ -94,6 +94,7 @@ void App::Run(int argc, char* argv[])
 	config.useEMS = true;
 	config.useXMS = true;
 	config.debugMemoryLog = false;
+	config.transliterateCyrillic = false;
 
 	if (argc > 1)
 	{
@@ -133,6 +134,10 @@ void App::Run(int argc, char* argv[])
 			else if (!stricmp(argv[n], "-debug") || !stricmp(argv[n], "-debugmem") || !stricmp(argv[n], "-memlog"))
 			{
 				config.debugMemoryLog = true;
+			}
+			else if (!stricmp(argv[n], "-translit") || !stricmp(argv[n], "-transliterate"))
+			{
+				config.transliterateCyrillic = true;
 			}
 		}
 	}

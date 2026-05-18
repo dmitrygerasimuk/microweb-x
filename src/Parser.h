@@ -31,7 +31,8 @@ struct TextEncoding
 		UTF8,
 		ISO_8859_1,
 		ISO_8859_2,
-		CP1251
+		CP1251,
+		CP866
 	};
 };
 
