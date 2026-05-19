@@ -12,6 +12,10 @@
 // GNU General Public License for more details.
 //
 
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <WinSock2.h>
 #include <windows.h>
 #include <stdarg.h>
 #include "../Platform.h"

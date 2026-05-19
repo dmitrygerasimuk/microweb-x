@@ -24,6 +24,9 @@
 #include "HTTP.h"
 
 #ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>
 #define PATH_MAX MAX_PATH
 #endif
@@ -84,6 +87,7 @@ struct AppConfig
 	bool useXMS : 1;
 	bool debugMemoryLog : 1;
 	bool transliterateCyrillic : 1;
+	unsigned int linearAllocatorChunkSize;
 };
 
 class App

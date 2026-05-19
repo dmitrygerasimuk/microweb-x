@@ -14,10 +14,12 @@
 
 #include <direct.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include "App.h"
 #include "Platform.h"
 #include "HTTP.h"
 #include "Image/Decoder.h"
+#include "Memory/Memory.h"
 #include "Memory/MemoryLog.h"
 
 App* App::app;
@@ -55,6 +57,32 @@ static void FormatLoadProgress(char* buffer, int bufferSize, const char* prefix,
 	{
 		snprintf(buffer, bufferSize, "%s %s", prefix, downloaded);
 	}
+}
+
+static unsigned int ParseLinearAllocatorChunkSize(const char* value)
+{
+	if (!value || !*value)
+	{
+		return 0;
+	}
+
+	char* end = NULL;
+	unsigned long size = strtoul(value, &end, 10);
+	if (!size)
+	{
+		return 0;
+	}
+
+	if (end && (*end == 'k' || *end == 'K'))
+	{
+		size *= 1024;
+	}
+	else if (size <= 64)
+	{
+		size *= 1024;
+	}
+
+	return (unsigned int)size;
 }
 
 App::App() 
@@ -95,6 +123,7 @@ void App::Run(int argc, char* argv[])
 	config.useXMS = true;
 	config.debugMemoryLog = false;
 	config.transliterateCyrillic = false;
+	config.linearAllocatorChunkSize = LinearAllocator::DefaultChunkSize();
 
 	if (argc > 1)
 	{
@@ -139,10 +168,29 @@ void App::Run(int argc, char* argv[])
 			{
 				config.transliterateCyrillic = true;
 			}
+			else if (strstr(argv[n], "-linalloc=") == argv[n])
+			{
+				unsigned int chunkSize = ParseLinearAllocatorChunkSize(argv[n] + 10);
+				if (chunkSize)
+				{
+					config.linearAllocatorChunkSize = chunkSize;
+				}
+			}
+			else if (!stricmp(argv[n], "-linalloc") && n + 1 < argc)
+			{
+				unsigned int chunkSize = ParseLinearAllocatorChunkSize(argv[n + 1]);
+				if (chunkSize)
+				{
+					config.linearAllocatorChunkSize = chunkSize;
+					n++;
+				}
+			}
 		}
 	}
 
 	MemoryDebugLogSetEnabled(config.debugMemoryLog);
+	MemoryManager::pageAllocator.SetChunkSize(config.linearAllocatorChunkSize);
+	MemoryDebugLog("LINALLOC config chunk=%u", (unsigned)MemoryManager::pageAllocator.GetChunkSize());
 	MemoryManager::pageBlockAllocator.Init();
 
 	if (config.loadImages)
