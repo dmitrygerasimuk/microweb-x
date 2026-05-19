@@ -51,6 +51,7 @@ private:
 class DOSNetworkDriver : public NetworkDriver
 {
 public:
+	DOSNetworkDriver();
 	virtual void Init();
 	virtual void Shutdown();
 	virtual void Update();

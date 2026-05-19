@@ -27,6 +27,7 @@
 #include "Nodes/LinkNode.h"
 #include "Draw/Surface.h"
 #include "Memory/Memory.h"
+#include "Memory/MemoryLog.h"
 
 #define TOP_MARGIN_PADDING 1
 
@@ -36,6 +37,7 @@ Page::Page(App& inApp) : app(inApp), layout(*this)
 
 void Page::Reset()
 {
+	MemoryDebugLog("BOOT page reset internals begin");
 	pageWidth = app.ui.windowRect.width;
 	pageHeight = 0;
 	pendingVerticalPadding = 0;
@@ -45,18 +47,29 @@ void Page::Reset()
 	cursorY = TOP_MARGIN_PADDING;
 	colourScheme = Platform::video->colourScheme;
 
+	MemoryDebugLog("BOOT page reset page allocator reset begin");
 	MemoryManager::pageAllocator.Reset();
+	MemoryDebugLog("BOOT page reset page allocator reset done");
+	MemoryDebugLog("BOOT page reset block allocator reset begin");
 	MemoryManager::pageBlockAllocator.Reset();
+	MemoryDebugLog("BOOT page reset block allocator reset done");
 
+	MemoryDebugLog("BOOT page reset root construct begin");
 	rootNode = SectionElement::Construct(MemoryManager::pageAllocator, SectionElement::Document);
+	MemoryDebugLog("BOOT page reset root construct done root=%p", rootNode);
 	ElementStyle rootStyle;
 	rootStyle.alignment = ElementAlignment::Left;
 	rootStyle.fontSize = 1;
 	rootStyle.fontStyle = FontStyle::Regular;
 	rootStyle.fontColour = colourScheme.textColour;
+	MemoryDebugLog("BOOT page reset root setstyle begin");
 	rootNode->SetStyle(rootStyle);
+	MemoryDebugLog("BOOT page reset root setstyle done");
 
+	MemoryDebugLog("BOOT page reset layout reset begin");
 	layout.Reset();
+	MemoryDebugLog("BOOT page reset layout reset done");
+	MemoryDebugLog("BOOT page reset internals done");
 }
 
 void Page::SetTitle(const char* inTitle)

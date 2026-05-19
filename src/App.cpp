@@ -160,7 +160,8 @@ void App::Run(int argc, char* argv[])
 			{
 				config.useXMS = false;
 			}
-			else if (!stricmp(argv[n], "-debug") || !stricmp(argv[n], "-debugmem") || !stricmp(argv[n], "-memlog"))
+			else if (!stricmp(argv[n], "-debug") || !stricmp(argv[n], "-debugmem") ||
+				!stricmp(argv[n], "-memlog") || !stricmp(argv[n], "-bootlog"))
 			{
 				config.debugMemoryLog = true;
 			}
@@ -189,38 +190,84 @@ void App::Run(int argc, char* argv[])
 	}
 
 	MemoryDebugLogSetEnabled(config.debugMemoryLog);
+	MemoryDebugLog("BOOT app config parsed images=%d ems=%d xms=%d swap=%d", config.loadImages, config.useEMS, config.useXMS, config.useSwap);
 	MemoryManager::pageAllocator.SetChunkSize(config.linearAllocatorChunkSize);
 	MemoryDebugLog("LINALLOC config chunk=%u", (unsigned)MemoryManager::pageAllocator.GetChunkSize());
+	MemoryDebugLog("BOOT memblock init begin");
 	MemoryManager::pageBlockAllocator.Init();
+	MemoryDebugLog("BOOT memblock init done");
 
 	if (config.loadImages)
 	{
+		MemoryDebugLog("BOOT image decoder allocate begin");
 		ImageDecoder::Allocate();
+		MemoryDebugLog("BOOT image decoder allocate done");
 	}
 
+	MemoryDebugLog("BOOT style pool init begin");
 	StylePool::Get().Init();
+	MemoryDebugLog("BOOT style pool init done");
+	MemoryDebugLog("BOOT ui init begin");
 	ui.Init();
+	MemoryDebugLog("BOOT ui init done");
+	MemoryDebugLog("BOOT page reset begin");
 	page.Reset();
+	MemoryDebugLog("BOOT page reset done");
+	MemoryDebugLog("BOOT page renderer init begin");
 	pageRenderer.Init();
+	MemoryDebugLog("BOOT page renderer init done");
 
 	if (targetURL)
 	{
+		MemoryDebugLog("BOOT initial open url begin");
 		OpenURL(HTTPRequest::Get, targetURL);
+		MemoryDebugLog("BOOT initial open url done");
 	}
 	else
 	{
+		MemoryDebugLog("BOOT initial focus address begin");
 		ui.FocusNode(ui.addressBarNode);
+		MemoryDebugLog("BOOT initial focus address done");
 	}
 
+	bool firstLoop = true;
+	MemoryDebugLog("BOOT app main loop begin");
 	while (running)
 	{
-		Platform::Update();
-		Platform::input->RefreshMouse();
-
-		if (pageLoadTask.HasContent())
+		if (firstLoop)
 		{
+			MemoryDebugLog("BOOT first loop platform update begin");
+		}
+		Platform::Update();
+		if (firstLoop)
+		{
+			MemoryDebugLog("BOOT first loop platform update done");
+			MemoryDebugLog("BOOT first loop mouse refresh begin");
+		}
+		Platform::input->RefreshMouse();
+		if (firstLoop)
+		{
+			MemoryDebugLog("BOOT first loop mouse refresh done");
+		}
+
+		bool pageLoadHasContent = pageLoadTask.HasContent();
+		if (firstLoop)
+		{
+			MemoryDebugLog("BOOT first loop page load begin has=%d requested=%d parserFinished=%d download=%d",
+				pageLoadHasContent, requestedNewPage, parser.IsFinished(), pageLoadTask.downloadFile != NULL);
+		}
+		if (pageLoadHasContent)
+		{
+			if (firstLoop)
+			{
+				MemoryDebugLog("BOOT first loop page load content begin");
+			}
 			if (requestedNewPage)
 			{
+				if (firstLoop)
+				{
+					MemoryDebugLog("BOOT first loop page load requested begin");
+				}
 				if (pageLoadTask.downloadFile)
 				{
 					ui.SetStatusMessage("Downloading content...", StatusBarNode::GeneralStatus);
@@ -246,8 +293,16 @@ void App::Run(int argc, char* argv[])
 				}
 
 				requestedNewPage = false;
+				if (firstLoop)
+				{
+					MemoryDebugLog("BOOT first loop page load requested done");
+				}
 			}
 
+			if (firstLoop)
+			{
+				MemoryDebugLog("BOOT first loop page load read begin");
+			}
 			clock_t loadEndTime = clock() + UPDATE_TIME_SLICE;
 			size_t totalBytesRead = 0;
 			do 
@@ -274,6 +329,10 @@ void App::Run(int argc, char* argv[])
 
 				Platform::input->RefreshMouse();
 			} while (clock() < loadEndTime && !Platform::input->HasInputPending());
+			if (firstLoop)
+			{
+				MemoryDebugLog("BOOT first loop page load read done bytes=%u", (unsigned)totalBytesRead);
+			}
 
 			if (totalBytesRead && pageLoadTask.type == LoadTask::RemoteFile)
 			{
@@ -292,6 +351,11 @@ void App::Run(int argc, char* argv[])
 		}
 		else
 		{
+			if (firstLoop)
+			{
+				MemoryDebugLog("BOOT first loop page load empty begin requested=%d busy=%d parserFinished=%d",
+					requestedNewPage, pageLoadTask.IsBusy(), parser.IsFinished());
+			}
 			if (requestedNewPage)
 			{
 				if (pageLoadTask.type == LoadTask::RemoteFile)
@@ -337,11 +401,33 @@ void App::Run(int argc, char* argv[])
 			}
 			else if (!parser.IsFinished())
 			{
+				if (firstLoop)
+				{
+					MemoryDebugLog("BOOT first loop parser finish call begin");
+				}
 				parser.Finish();
+				if (firstLoop)
+				{
+					MemoryDebugLog("BOOT first loop parser finish call done");
+				}
+			}
+			if (firstLoop)
+			{
+				MemoryDebugLog("BOOT first loop page load empty done");
 			}
 		}
+		if (firstLoop)
+		{
+			MemoryDebugLog("BOOT first loop page load done");
+		}
 
-		if (pageContentLoadTask.HasContent())
+		bool pageContentHasContent = pageContentLoadTask.HasContent();
+		if (firstLoop)
+		{
+			MemoryDebugLog("BOOT first loop content load begin has=%d busy=%d target=%p",
+				pageContentHasContent, pageContentLoadTask.IsBusy(), loadTaskTargetNode);
+		}
+		if (pageContentHasContent)
 		{
 			clock_t contentLoadEndTime = clock() + UPDATE_TIME_SLICE;
 			size_t totalBytesRead = 0;
@@ -378,6 +464,10 @@ void App::Run(int argc, char* argv[])
 		}
 		else if(!pageContentLoadTask.IsBusy())
 		{
+			if (firstLoop)
+			{
+				MemoryDebugLog("BOOT first loop content load idle begin target=%p", loadTaskTargetNode);
+			}
 			if (loadTaskTargetNode)
 			{
 				loadTaskTargetNode->Handler().FinishContent(loadTaskTargetNode, pageContentLoadTask);
@@ -395,13 +485,40 @@ void App::Run(int argc, char* argv[])
 					}
 				}
 			}
+			if (firstLoop)
+			{
+				MemoryDebugLog("BOOT first loop content load idle done");
+			}
+		}
+		if (firstLoop)
+		{
+			MemoryDebugLog("BOOT first loop content load done");
 		}
 		//if (loadTask.type == LoadTask::RemoteFile && loadTask.request && loadTask.request->GetStatus() == HTTPRequest::Connecting)
 		//	ui.SetStatusMessage(loadTask.request->GetStatusString());
 
+		if (firstLoop)
+		{
+			MemoryDebugLog("BOOT first loop layout update begin");
+		}
 		page.layout.Update();
+		if (firstLoop)
+		{
+			MemoryDebugLog("BOOT first loop layout update done");
+			MemoryDebugLog("BOOT first loop renderer update begin");
+		}
 		pageRenderer.Update();
+		if (firstLoop)
+		{
+			MemoryDebugLog("BOOT first loop renderer update done");
+			MemoryDebugLog("BOOT first loop ui update begin");
+		}
 		ui.Update();
+		if (firstLoop)
+		{
+			MemoryDebugLog("BOOT first loop ui update done");
+			firstLoop = false;
+		}
 	}
 }
 

@@ -28,6 +28,7 @@
 #include "Nodes/StyNode.h"
 #include "Nodes/ImgNode.h"
 #include "Memory/Memory.h"
+#include "Memory/MemoryLog.h"
 #include "App.h"
 #include "DataPack.h"
 
@@ -156,10 +157,15 @@ void HTMLParser::PopContext(const HTMLTagHandler* tag)
 
 void HTMLParser::Finish()
 {
+	MemoryDebugLog("BOOT parser finish begin state=%d text=%u", parseState, (unsigned)textBufferSize);
 	FlushTextBuffer();
+	MemoryDebugLog("BOOT parser finish flushed");
 	parseState = ParseFinished;
+	MemoryDebugLog("BOOT parser finish mark layout begin");
 	page.layout.MarkParsingComplete();
+	MemoryDebugLog("BOOT parser finish stop load begin");
 	page.GetApp().pageLoadTask.Stop();
+	MemoryDebugLog("BOOT parser finish done");
 }
 
 void HTMLParser::UnwindContextStack()

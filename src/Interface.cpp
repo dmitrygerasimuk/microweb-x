@@ -29,6 +29,7 @@
 #include "DataPack.h"
 #include "Event.h"
 #include "Memory/Memory.h"
+#include "Memory/MemoryLog.h"
 
 AppInterface::AppInterface(App& inApp) : app(inApp)
 {
@@ -44,12 +45,18 @@ AppInterface::AppInterface(App& inApp) : app(inApp)
 
 void AppInterface::Init()
 {
+	MemoryDebugLog("BOOT ui generate nodes begin");
 	GenerateInterfaceNodes();
+	MemoryDebugLog("BOOT ui generate nodes done");
 
+	MemoryDebugLog("BOOT ui set title begin");
 	SetTitle("MicroWeb");
+	MemoryDebugLog("BOOT ui set title done");
 
 	DrawContext context(Platform::video->drawSurface, 0, 0, Platform::video->screenWidth, Platform::video->screenHeight);
+	MemoryDebugLog("BOOT ui draw interface begin");
 	DrawInterfaceNodes(context);
+	MemoryDebugLog("BOOT ui draw interface done");
 }
 
 void AppInterface::Reset()
@@ -451,6 +458,7 @@ void AppInterface::UpdatePageScrollBar()
 
 void AppInterface::GenerateInterfaceNodes()
 {
+	MemoryDebugLog("BOOT ui nodes root begin");
 	Allocator& allocator = MemoryManager::interfaceAllocator;
 	ElementStyle rootInterfaceStyle;
 	rootInterfaceStyle.alignment = ElementAlignment::Left;
@@ -460,11 +468,14 @@ void AppInterface::GenerateInterfaceNodes()
 
 	rootInterfaceNode = SectionElement::Construct(allocator, SectionElement::Interface);
 	rootInterfaceNode->SetStyle(rootInterfaceStyle);
+	MemoryDebugLog("BOOT ui nodes root done root=%p", rootInterfaceNode);
 
 	Font* interfaceFont = Assets.GetFont(1, FontStyle::Regular);
 	Font* smallInterfaceFont = Assets.GetFont(0, FontStyle::Regular);
+	MemoryDebugLog("BOOT ui nodes fonts done font=%p small=%p", interfaceFont, smallInterfaceFont);
 
 	{
+		MemoryDebugLog("BOOT ui nodes title begin");
 		titleBuffer[0] = '\0';
 		titleNode = allocator.Alloc<TextElement::Data>(MemBlockHandle (titleBuffer));
 		titleNode->anchor.Clear();
@@ -472,8 +483,10 @@ void AppInterface::GenerateInterfaceNodes()
 		titleNode->size.y = interfaceFont->glyphHeight;
 		titleNode->styleHandle = rootInterfaceNode->styleHandle;
 		rootInterfaceNode->AddChild(titleNode);
+		MemoryDebugLog("BOOT ui nodes title done node=%p", titleNode);
 	}
 
+	MemoryDebugLog("BOOT ui nodes buttons begin");
 	backButtonNode = ButtonNode::Construct(allocator, " < ", OnBackButtonPressed);
 	backButtonNode->styleHandle = rootInterfaceNode->styleHandle;
 	backButtonNode->size = ButtonNode::CalculateSize(backButtonNode);
@@ -487,7 +500,9 @@ void AppInterface::GenerateInterfaceNodes()
 	forwardButtonNode->anchor.x = backButtonNode->anchor.x + backButtonNode->size.x + 2;
 	forwardButtonNode->anchor.y = titleNode->size.y;
 	rootInterfaceNode->AddChild(forwardButtonNode);
+	MemoryDebugLog("BOOT ui nodes buttons done back=%p forward=%p", backButtonNode, forwardButtonNode);
 
+	MemoryDebugLog("BOOT ui nodes address begin");
 	addressBarNode = TextFieldNode::Construct(allocator, addressBarURL.url, MAX_URL_LENGTH - 1, OnAddressBarSubmit);
 	addressBarNode->styleHandle = rootInterfaceNode->styleHandle;
 	addressBarNode->anchor.x = forwardButtonNode->anchor.x + forwardButtonNode->size.x + 2;
@@ -495,7 +510,9 @@ void AppInterface::GenerateInterfaceNodes()
 	addressBarNode->size.x = Platform::video->screenWidth - addressBarNode->anchor.x - 1;
 	addressBarNode->size.y = backButtonNode->size.y;
 	rootInterfaceNode->AddChild(addressBarNode);
+	MemoryDebugLog("BOOT ui nodes address done node=%p", addressBarNode);
 
+	MemoryDebugLog("BOOT ui nodes status begin");
 	statusBarNode = StatusBarNode::Construct(allocator);
 	statusBarNode->size.x = Platform::video->screenWidth;
 	statusBarNode->size.y = smallInterfaceFont->glyphHeight + 2;
@@ -506,7 +523,9 @@ void AppInterface::GenerateInterfaceNodes()
 	ElementStyle statusBarStyle = rootInterfaceStyle;
 	statusBarStyle.fontSize = 0;
 	statusBarNode->SetStyle(statusBarStyle);
+	MemoryDebugLog("BOOT ui nodes status done node=%p", statusBarNode);
 
+	MemoryDebugLog("BOOT ui nodes scrollbar begin");
 	scrollBarNode = ScrollBarNode::Construct(allocator, scrollPositionY, app.page.pageHeight, OnScrollBarMoved);
 	scrollBarNode->styleHandle = rootInterfaceNode->styleHandle;
 	scrollBarNode->anchor.y = backButtonNode->anchor.y + backButtonNode->size.y + 2;
@@ -514,6 +533,7 @@ void AppInterface::GenerateInterfaceNodes()
 	scrollBarNode->size.y = Platform::video->screenHeight - scrollBarNode->anchor.y - statusBarNode->size.y;
 	scrollBarNode->anchor.x = Platform::video->screenWidth - scrollBarNode->size.x;
 	rootInterfaceNode->AddChild(scrollBarNode);
+	MemoryDebugLog("BOOT ui nodes scrollbar done node=%p", scrollBarNode);
 
 	windowRect.x = 0;
 	windowRect.y = backButtonNode->anchor.y + backButtonNode->size.y + 2;
@@ -522,24 +542,35 @@ void AppInterface::GenerateInterfaceNodes()
 
 	pageHeightForDimensionScaling = windowRect.height;
 
+	MemoryDebugLog("BOOT ui nodes mark styles begin");
 	StylePool::Get().MarkInterfaceStylesComplete();
+	MemoryDebugLog("BOOT ui nodes mark styles done");
 
+	MemoryDebugLog("BOOT ui nodes mark layout begin");
 	for (Node* node = rootInterfaceNode; node; node = node->GetNextInTree())
 	{
 		node->isLayoutComplete = true;
 	}
+	MemoryDebugLog("BOOT ui nodes mark layout done");
 }
 
 void AppInterface::DrawInterfaceNodes(DrawContext& context)
 {
+	MemoryDebugLog("BOOT ui draw hide mouse begin");
 	Platform::input->HideMouse();
+	MemoryDebugLog("BOOT ui draw clear begin");
 	Platform::video->drawSurface->Clear();
 
+	MemoryDebugLog("BOOT ui draw nodes begin");
 	app.pageRenderer.DrawAll(context, rootInterfaceNode);
+	MemoryDebugLog("BOOT ui draw nodes done");
 
 	uint8_t dividerColour = Platform::video->colourScheme.textColour;
+	MemoryDebugLog("BOOT ui draw divider begin");
 	context.surface->HLine(context, 0, windowRect.y - 1, Platform::video->screenWidth, dividerColour);
+	MemoryDebugLog("BOOT ui draw show mouse begin");
 	Platform::input->ShowMouse();
+	MemoryDebugLog("BOOT ui draw done");
 }
 
 void AppInterface::SetTitle(const char* title)

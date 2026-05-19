@@ -33,9 +33,10 @@ static bool memoryDebugLogEnabled = false;
 
 void MemoryDebugLogSetEnabled(bool enabled)
 {
+	bool wasEnabled = memoryDebugLogEnabled;
 	memoryDebugLogEnabled = enabled;
 
-	if (enabled)
+	if (enabled && !wasEnabled)
 	{
 		FILE* file = fopen("C:\\MEMLOG.TXT", "w");
 		if (!file)
@@ -46,6 +47,20 @@ void MemoryDebugLogSetEnabled(bool enabled)
 		{
 			fprintf(file, "MEMLOG enabled\n");
 			fclose(file);
+		}
+	}
+}
+
+void MemoryDebugLogEnableFromArgs(int argc, char* argv[])
+{
+	for (int n = 1; n < argc; n++)
+	{
+		if (!stricmp(argv[n], "-debug") || !stricmp(argv[n], "-debugmem") ||
+			!stricmp(argv[n], "-memlog") || !stricmp(argv[n], "-bootlog"))
+		{
+			MemoryDebugLogSetEnabled(true);
+			MemoryDebugLog("BOOT memlog early-enabled arg=%s", argv[n]);
+			return;
 		}
 	}
 }

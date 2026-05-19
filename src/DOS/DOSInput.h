@@ -19,6 +19,9 @@
 class DOSInputDriver : public InputDriver
 {
 public:
+	DOSInputDriver();
+	void DisableMouse();
+	void DisableMouseReset();
 	virtual void Init();
 	virtual void Shutdown();
 
@@ -36,11 +39,17 @@ public:
 	virtual bool HasInputPending();
 
 private:
+	void ClearMouseButtonQueues();
+	void ClampMousePosition(int& x, int& y);
+
 	MouseCursor::Type currentCursor;
 	bool mouseVisible;
 	bool hasMouse;
 	int mouseHideCount;
 	bool useMouseDriverCursor;
+	bool mouseDisabled;
+	bool skipMouseReset;
+	int mouseStatusLogCount;
 
 	int queuedPressX, queuedPressY;
 	int lastMouseX, lastMouseY;

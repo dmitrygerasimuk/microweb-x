@@ -23,6 +23,39 @@
 #include "../DataPack.h"
 #include "../Draw/Surface.h"
 #include "../VidModes.h"
+#include "../Memory/MemoryLog.h"
+
+DOSInputDriver::DOSInputDriver()
+{
+	mouseDisabled = false;
+	skipMouseReset = false;
+	mouseStatusLogCount = 0;
+}
+
+void DOSInputDriver::DisableMouse()
+{
+	mouseDisabled = true;
+}
+
+void DOSInputDriver::DisableMouseReset()
+{
+	skipMouseReset = true;
+}
+
+static void SetMouseDriverRange(int maxX, int maxY)
+{
+	union REGS inreg, outreg;
+
+	inreg.w.ax = 0x7;
+	inreg.w.cx = 0;
+	inreg.w.dx = maxX;
+	int86(0x33, &inreg, &outreg);
+
+	inreg.w.ax = 0x8;
+	inreg.w.cx = 0;
+	inreg.w.dx = maxY;
+	int86(0x33, &inreg, &outreg);
+}
 
 static uint8_t RemapCP866ToCP1251(uint8_t code)
 {
@@ -53,6 +86,7 @@ void DOSInputDriver::Init()
 {
 	union REGS inreg, outreg;
 	bool forceSoftwareMouse = Platform::video->drawSurface->format == DrawSurface::Format_2BPP;
+	MemoryDebugLog("BOOT mouse init begin disabled=%d forceSoft=%d", mouseDisabled, forceSoftwareMouse);
 
 	hasMouse = false;
 	useMouseDriverCursor = false;
@@ -63,28 +97,51 @@ void DOSInputDriver::Init()
 	lastMouseY = -1;
 	queuedPressX = -1;
 	queuedPressY = -1;
+	mouseStatusLogCount = 0;
+	if (mouseDisabled)
+	{
+		MemoryDebugLog("BOOT mouse disabled");
+		return;
+	}
 
-	inreg.x.ax = 0;
-	int86(0x33, &inreg, &outreg);
-	hasMouse = (outreg.x.ax == 0xffff);
+	if (skipMouseReset)
+	{
+		hasMouse = true;
+		MemoryDebugLog("BOOT mouse reset skipped");
+	}
+	else
+	{
+		MemoryDebugLog("BOOT mouse reset begin");
+		inreg.x.ax = 0;
+		int86(0x33, &inreg, &outreg);
+		hasMouse = (outreg.x.ax == 0xffff);
+		MemoryDebugLog("BOOT mouse reset done ax=%04x bx=%04x has=%d", (unsigned)outreg.x.ax, (unsigned)outreg.x.bx, hasMouse);
+	}
+
+	if (!hasMouse)
+	{
+		MemoryDebugLog("BOOT mouse absent");
+		return;
+	}
 
 	useMouseDriverCursor = Platform::video->GetVideoModeInfo()->useMouseDriverCursor
 		&& !forceSoftwareMouse;
+	MemoryDebugLog("BOOT mouse cursor mode driver=%d", useMouseDriverCursor);
 	SetMouseCursor(MouseCursor::Pointer);
 
-	// Set Horizontal Range
 	int horizontalRange = Platform::video->screenWidth;
 	if (horizontalRange == 320) horizontalRange = 640;			// Due some strangeness of how DOS mouse drivers work
-	inreg.w.ax = 0x7;
-	inreg.w.cx = 0;          // Minimum X
-	inreg.w.dx = horizontalRange - 1;  // Maximum X 
-	int86(0x33, &inreg, &outreg);
+	MemoryDebugLog("BOOT mouse range begin max=%d,%d", horizontalRange - 1, Platform::video->screenHeight - 1);
+	SetMouseDriverRange(horizontalRange - 1, Platform::video->screenHeight - 1);
+	MemoryDebugLog("BOOT mouse range done");
 
-	// Set Vertical Range 
-	inreg.w.ax = 0x8;
-	inreg.w.cx = 0;          // Minimum Y
-	inreg.w.dx = Platform::video->screenHeight - 1;  // Maximum Y 
-	int86(0x33, &inreg, &outreg);
+	MemoryDebugLog("BOOT mouse position begin");
+	SetMousePosition(Platform::video->screenWidth / 2, Platform::video->screenHeight / 2);
+	MemoryDebugLog("BOOT mouse position done");
+
+	MemoryDebugLog("BOOT mouse queues clear begin");
+	ClearMouseButtonQueues();
+	MemoryDebugLog("BOOT mouse queues clear done");
 
 	// Set mouse mickey ratio
 	//inreg.w.ax = 0xf;
@@ -93,11 +150,22 @@ void DOSInputDriver::Init()
 	//int86(0x33, &inreg, &outreg);
 
 	ShowMouse();
+	MemoryDebugLog("BOOT mouse init done visible=%d", mouseVisible);
 }
 
 void DOSInputDriver::Shutdown()
 {
+	MemoryDebugLog("BOOT mouse shutdown begin has=%d visible=%d", hasMouse, mouseVisible);
 	HideMouse();
+	if (hasMouse)
+	{
+		MemoryDebugLog("BOOT mouse restore range begin");
+		SetMouseDriverRange(639, 199);
+		SetMousePosition(0, 0);
+		ClearMouseButtonQueues();
+		MemoryDebugLog("BOOT mouse restore range done");
+	}
+	MemoryDebugLog("BOOT mouse shutdown done");
 }
 
 void DOSInputDriver::ShowMouse()
@@ -124,9 +192,12 @@ void DOSInputDriver::SetMousePosition(int x, int y)
 {
 	if (!hasMouse)
 		return;
+
+	ClampMousePosition(x, y);
+
 	union REGS inreg, outreg;
 	inreg.x.ax = 4;
-	inreg.x.cx = x;
+	inreg.x.cx = (Platform::video->screenWidth == 320) ? x * 2 : x;
 	inreg.x.dx = y;
 	int86(0x33, &inreg, &outreg);
 }
@@ -156,6 +227,7 @@ bool DOSInputDriver::GetMouseButtonPress(int& x, int& y)
 	{
 		x /= 2;
 	}
+	ClampMousePosition(x, y);
 
 	return (outreg.x.bx > 0);
 }
@@ -176,6 +248,7 @@ bool DOSInputDriver::GetMouseButtonRelease(int& x, int& y)
 	{
 		x /= 2;
 	}
+	ClampMousePosition(x, y);
 
 	return (outreg.x.bx > 0);
 }
@@ -250,10 +323,71 @@ void DOSInputDriver::GetMouseStatus(int& buttons, int& x, int& y)
 	x = outreg.x.cx;
 	y = outreg.x.dx;
 	buttons = outreg.x.bx;
+	int rawX = x;
+	int rawY = y;
 
 	if (Platform::video->screenWidth == 320)
 	{
 		x /= 2;
+	}
+	ClampMousePosition(x, y);
+
+	int cookedRawX = rawX;
+	if (Platform::video->screenWidth == 320)
+	{
+		cookedRawX /= 2;
+	}
+	bool wasClamped = (cookedRawX != x) || rawY != y;
+	if (mouseStatusLogCount < 8 || (wasClamped && mouseStatusLogCount < 64))
+	{
+		MemoryDebugLog("MOUSE status raw=%d,%d cooked=%d,%d buttons=%d clamp=%d", rawX, rawY, x, y, buttons, wasClamped);
+		mouseStatusLogCount++;
+	}
+}
+
+void DOSInputDriver::ClearMouseButtonQueues()
+{
+	if (!hasMouse)
+	{
+		return;
+	}
+
+	union REGS inreg, outreg;
+	inreg.x.ax = 5;
+	inreg.x.bx = 0;
+	int86(0x33, &inreg, &outreg);
+
+	inreg.x.ax = 6;
+	inreg.x.bx = 0;
+	int86(0x33, &inreg, &outreg);
+
+	queuedPressX = -1;
+	queuedPressY = -1;
+}
+
+void DOSInputDriver::ClampMousePosition(int& x, int& y)
+{
+	if (!Platform::video)
+	{
+		return;
+	}
+
+	if (x < 0)
+	{
+		x = 0;
+	}
+	else if (x >= Platform::video->screenWidth)
+	{
+		x = Platform::video->screenWidth - 1;
+	}
+
+	if (y < 0)
+	{
+		y = 0;
+	}
+	else if (y >= Platform::video->screenHeight)
+	{
+		y = Platform::video->screenHeight - 1;
 	}
 }
 

@@ -15,27 +15,38 @@
 #include <stdio.h>
 #include "Platform.h"
 #include "App.h"
+#include "Memory/MemoryLog.h"
 
 #pragma warning(disable:4996)
 
 int main(int argc, char* argv[])
 {
+	MemoryDebugLogEnableFromArgs(argc, argv);
+	MemoryDebugLog("BOOT main begin argc=%d", argc);
+	MemoryDebugLog("BOOT platform init begin");
 	if (!Platform::Init(argc, argv))
 	{
+		MemoryDebugLog("BOOT platform init cancelled");
 		return 0;
 	}
+	MemoryDebugLog("BOOT platform init done");
 
 	App* app = new App();
 
 	if (!app)
 	{
+		MemoryDebugLog("BOOT app alloc failed");
 		Platform::FatalError("Error allocating memory for application");
 		return 0;
 	}
 
+	MemoryDebugLog("BOOT app run begin");
 	app->Run(argc, argv);
+	MemoryDebugLog("BOOT app run done");
 
+	MemoryDebugLog("BOOT platform shutdown begin");
 	Platform::Shutdown();
+	MemoryDebugLog("BOOT platform shutdown done");
 
 	return 0;
 }

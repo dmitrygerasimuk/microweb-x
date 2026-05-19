@@ -14,6 +14,7 @@
 
 #include "DOSNet.h"
 #include "../HTTP.h"
+#include "../Memory/MemoryLog.h"
 
 #include <bios.h>
 #include <io.h>
@@ -47,18 +48,34 @@ void __interrupt __far ctrlBreakHandler() {
 	CtrlBreakDetected = 1;
 }
 
+DOSNetworkDriver::DOSNetworkDriver()
+{
+	isConnected = false;
+	for (int n = 0; n < MAX_CONCURRENT_HTTP_REQUESTS; n++)
+	{
+		requests[n] = NULL;
+		sockets[n] = NULL;
+	}
+}
+
 void DOSNetworkDriver::Init()
 {
 	isConnected = false;
 
 	//printf("Init network driver\n");
-	if (Utils::parseEnv() != 0) {
+	MemoryDebugLog("BOOT net parseEnv begin");
+	int parseResult = Utils::parseEnv();
+	MemoryDebugLog("BOOT net parseEnv done result=%d", parseResult);
+	if (parseResult != 0) {
 		printf("Failed in parseEnv()\n");
 		return;
 	}
 
 	//printf("Init network stack\n");
-	if (Utils::initStack(MAX_CONCURRENT_HTTP_REQUESTS, TCP_SOCKET_RING_SIZE, ctrlBreakHandler, ctrlBreakHandler)) {
+	MemoryDebugLog("BOOT net initStack begin req=%d ring=%d", MAX_CONCURRENT_HTTP_REQUESTS, TCP_SOCKET_RING_SIZE);
+	int initResult = Utils::initStack(MAX_CONCURRENT_HTTP_REQUESTS, TCP_SOCKET_RING_SIZE, ctrlBreakHandler, ctrlBreakHandler);
+	MemoryDebugLog("BOOT net initStack done result=%d", initResult);
+	if (initResult) {
 		printf("Failed to initialize TCP/IP\n");
 		return;
 	}
@@ -66,12 +83,14 @@ void DOSNetworkDriver::Init()
 	for (int n = 0; n < MAX_CONCURRENT_HTTP_REQUESTS; n++)
 	{
 		requests[n] = new HTTPRequest();
+		MemoryDebugLog("BOOT net request alloc begin index=%d", n);
 		if (!requests[n])
 		{
 			Platform::FatalError("Could not allocate memory for HTTP request");
 		}
 
 		sockets[n] = new DOSTCPSocket();
+		MemoryDebugLog("BOOT net socket alloc begin index=%d", n);
 		if (!sockets[n])
 		{
 			Platform::FatalError("Could not allocate memory for TCP socket");
@@ -80,15 +99,34 @@ void DOSNetworkDriver::Init()
 
 	printf("Network interface initialised\n");
 	isConnected = true;
+	MemoryDebugLog("BOOT net init complete");
 }
 
 void DOSNetworkDriver::Shutdown()
 {
+	MemoryDebugLog("BOOT net driver shutdown begin connected=%d", isConnected);
+	for (int n = 0; n < MAX_CONCURRENT_HTTP_REQUESTS; n++)
+	{
+		if (requests[n])
+		{
+			MemoryDebugLog("BOOT net request stop index=%d", n);
+			requests[n]->Stop();
+		}
+		if (sockets[n] && sockets[n]->GetSock())
+		{
+			MemoryDebugLog("BOOT net socket close index=%d", n);
+			sockets[n]->Close();
+		}
+	}
+
 	if (isConnected)
 	{
+		MemoryDebugLog("BOOT net endStack begin");
 		Utils::endStack();
+		MemoryDebugLog("BOOT net endStack done");
 		isConnected = false;
 	}
+	MemoryDebugLog("BOOT net driver shutdown done");
 }
 
 void DOSNetworkDriver::Update()
@@ -214,8 +252,9 @@ void DOSTCPSocket::Close()
 {
 	if (sock)
 	{
-		sock->closeNonblocking();
-		TcpSocketMgr::freeSocket(sock);
+		TcpSocket* oldSock = sock;
 		sock = NULL;
+		oldSock->closeNonblocking();
+		TcpSocketMgr::freeSocket(oldSock);
 	}
 }

@@ -26,6 +26,7 @@
 #include "../Font.h"
 #include "../Draw/Surface.h"
 #include "../Memory/Memory.h"
+#include "../Memory/MemoryLog.h"
 #include "../App.h"
 
 VideoDriver* Platform::video = nullptr;
@@ -183,15 +184,40 @@ static int AutoDetectVideoMode()
 #include "../Node.h"
 #include <stdio.h>
 #include <ctype.h>
+#include <string.h>
 
+
+static bool HasCommandLineArg(int argc, char* argv[], const char* arg)
+{
+	for (int n = 1; n < argc; n++)
+	{
+		if (!stricmp(argv[n], arg))
+		{
+			return true;
+		}
+	}
+	return false;
+}
 bool Platform::Init(int argc, char* argv[])
 {
-	network = new DOSNetworkDriver();
-	if (network)
+	MemoryDebugLog("BOOT dos platform init begin");
+	if (HasCommandLineArg(argc, argv, "-nonet"))
 	{
-		network->Init();
+		MemoryDebugLog("BOOT net skipped by -nonet");
+		network = new NetworkDriver();
 	}
-	else FatalError("Could not create network driver");
+	else
+	{
+		MemoryDebugLog("BOOT net alloc begin");
+		network = new DOSNetworkDriver();
+		if (network)
+		{
+			MemoryDebugLog("BOOT net init begin");
+			network->Init();
+			MemoryDebugLog("BOOT net init done connected=%d", network->IsConnected());
+		}
+		else FatalError("Could not create network driver");
+	}
 
 	VideoModeInfo* videoMode = nullptr;
 
@@ -211,12 +237,16 @@ bool Platform::Init(int argc, char* argv[])
 
 	if (!videoMode)
 	{
+		MemoryDebugLog("BOOT video picker begin");
 		int suggestedMode = AutoDetectVideoMode();
+		MemoryDebugLog("BOOT video autodetect suggested=%d", suggestedMode);
 		videoMode = ShowVideoModePicker(suggestedMode);
+		MemoryDebugLog("BOOT video picker done mode=%p", videoMode);
 	}
 
 	if (!videoMode)
 	{
+		MemoryDebugLog("BOOT video picker cancelled");
 		return false;
 	}
 
@@ -225,6 +255,7 @@ bool Platform::Init(int argc, char* argv[])
 		App::config.invertScreen = true;
 	}
 
+	MemoryDebugLog("BOOT video driver alloc begin bios=%u", (unsigned)videoMode->biosVideoMode);
 	if (videoMode->biosVideoMode == HERCULES_MODE)
 	{
 		video = new HerculesDriver();
@@ -239,41 +270,94 @@ bool Platform::Init(int argc, char* argv[])
 		FatalError("Could not create video driver");
 	}
 
+	MemoryDebugLog("BOOT video init begin");
 	video->Init(videoMode);
-
-	input = new DOSInputDriver();
+	MemoryDebugLog("BOOT video init done %dx%d", video->screenWidth, video->screenHeight);
+	DOSInputDriver* dosInput = new DOSInputDriver();
+	if (dosInput && HasCommandLineArg(argc, argv, "-nomouse"))
+	{
+		dosInput->DisableMouse();
+	}
+	if (dosInput && (HasCommandLineArg(argc, argv, "-mousesafe") || HasCommandLineArg(argc, argv, "-nomousereset")))
+	{
+		dosInput->DisableMouseReset();
+	}
+	input = dosInput;
 	if (input)
 	{
+		MemoryDebugLog("BOOT input init begin");
 		input->Init();
+		MemoryDebugLog("BOOT input init done");
 	}
 	else FatalError("Could not create input driver");
 
+	MemoryDebugLog("BOOT dos platform init done");
 	return true;
 }
 
 void Platform::Shutdown()
 {
+	MemoryDebugLog("BOOT dos platform shutdown begin");
+	if (input)
+	{
+		MemoryDebugLog("BOOT input shutdown begin");
+		input->Shutdown();
+		MemoryDebugLog("BOOT input shutdown done");
+	}
+	if (network)
+	{
+		MemoryDebugLog("BOOT net shutdown begin");
+		network->Shutdown();
+		MemoryDebugLog("BOOT net shutdown done");
+	}
 	MemoryManager::pageBlockAllocator.Shutdown();
-	input->Shutdown();
-	video->Shutdown();
-	network->Shutdown();
-
+	if (video)
+	{
+		MemoryDebugLog("BOOT video shutdown begin");
+		video->Shutdown();
+		MemoryDebugLog("BOOT video shutdown done");
+	}
 	delete video;
+	video = nullptr;
+	input = nullptr;
+	network = nullptr;
+	MemoryDebugLog("BOOT dos platform shutdown done");
 }
 
 void Platform::Update()
 {
-	network->Update();
-	input->Update();
+	if (network)
+	{
+		network->Update();
+	}
+	if (input)
+	{
+		input->Update();
+	}
 }
 
 void Platform::FatalError(const char* message, ...)
 {
+	MemoryDebugLog("BOOT fatal begin");
 	va_list args;
 
+	if (input)
+	{
+		MemoryDebugLog("BOOT fatal input shutdown begin");
+		input->Shutdown();
+		MemoryDebugLog("BOOT fatal input shutdown done");
+	}
 	if (video)
 	{
+		MemoryDebugLog("BOOT fatal video shutdown begin");
 		video->Shutdown();
+		MemoryDebugLog("BOOT fatal video shutdown done");
+	}
+	if (network)
+	{
+		MemoryDebugLog("BOOT fatal net shutdown begin");
+		network->Shutdown();
+		MemoryDebugLog("BOOT fatal net shutdown done");
 	}
 
 	va_start(args, message);
@@ -283,6 +367,6 @@ void Platform::FatalError(const char* message, ...)
 
 	MemoryManager::pageBlockAllocator.Shutdown();
 
+	MemoryDebugLog("BOOT fatal exit");
 	exit(1);
 }
-
