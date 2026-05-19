@@ -7,6 +7,8 @@
 #include "../KeyCodes.h"
 #include "Select.h"
 
+static SelectNode* activeDropDownHandler = nullptr;
+
 SelectNode::Data* SelectNode::Construct(Allocator& allocator, const char* name)
 {
 	return allocator.Alloc<SelectNode::Data>(allocator.AllocString(name));
@@ -183,6 +185,10 @@ bool SelectNode::HandleEvent(Node* node, const Event& event)
 						ui.FocusNode(nullptr);
 						node->Redraw();
 					}
+					else
+					{
+						ui.FocusNode(nullptr);
+					}
 				}
 			}
 			else
@@ -294,6 +300,16 @@ Node* SelectNode::Pick(Node* node, int x, int y)
 	return nullptr;
 }
 
+Node* SelectNode::GetActiveDropDownNode()
+{
+	if (!activeDropDownHandler || !activeDropDownHandler->dropDownMenu.activeNode)
+	{
+		return nullptr;
+	}
+
+	return activeDropDownHandler->dropDownMenu.activeNode;
+}
+
 void SelectNode::DrawDropDownMenu()
 {
 	Font* font = dropDownMenu.activeNode->GetStyleFont();
@@ -333,6 +349,7 @@ void SelectNode::DrawDropDownMenu()
 void SelectNode::ShowDropDownMenu(Node *node)
 {
 	dropDownMenu.activeNode = node;
+	activeDropDownHandler = this;
 	dropDownMenu.numOptions = 0;
 
 	SelectNode::Data* data = static_cast<SelectNode::Data*>(dropDownMenu.activeNode);
@@ -388,6 +405,10 @@ void SelectNode::CloseDropDownMenu()
 		int offsetY = App::Get().ui.windowRect.y - App::Get().ui.GetScrollPositionY();
 		App::Get().pageRenderer.MarkScreenRegionDirty(dropDownMenu.rect.x, dropDownMenu.rect.y + offsetY, dropDownMenu.rect.x + dropDownMenu.rect.width, dropDownMenu.rect.y + dropDownMenu.rect.height + offsetY);
 		dropDownMenu.activeNode = nullptr;
+		if (activeDropDownHandler == this)
+		{
+			activeDropDownHandler = nullptr;
+		}
 		App::Get().pageRenderer.SetPaused(false);
 	}
 }

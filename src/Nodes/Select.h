@@ -40,6 +40,8 @@ public:
 	virtual bool HandleEvent(Node* node, const Event& event);
 	virtual Node* Pick(Node* node, int x, int y) override;
 
+	static Node* GetActiveDropDownNode();
+
 	void DrawHighlight(Node* node, uint8_t colour);
 
 	void DrawDropDownMenu();

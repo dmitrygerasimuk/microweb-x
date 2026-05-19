@@ -24,6 +24,7 @@
 #include "Nodes/Status.h"
 #include "Nodes/ImgNode.h"
 #include "Nodes/Scroll.h"
+#include "Nodes/Select.h"
 #include "Draw/Surface.h"
 #include "DataPack.h"
 #include "Event.h"
@@ -367,6 +368,12 @@ Node* AppInterface::PickNode(int x, int y)
 	if (x >= windowRect.x && y >= windowRect.y && x < windowRect.x + windowRect.width && y < windowRect.y + windowRect.height)
 	{
 		TransformScreenToPage(x, y);
+
+		Node* activeDropDownNode = SelectNode::GetActiveDropDownNode();
+		if (activeDropDownNode)
+		{
+			return activeDropDownNode;
+		}
 
 		Node* pageRootNode = app.page.GetRootNode();
 		return pageRootNode->Handler().Pick(pageRootNode, x, y);
