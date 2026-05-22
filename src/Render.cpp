@@ -304,6 +304,11 @@ void PageRenderer::Update()
 		{
 			renderQueue.Dequeue();
 
+			if (!App::config.legacyNetworkPump && !App::Get().IsBulkTransferActive() && Platform::network)
+			{
+				Platform::network->Update();
+			}
+
 			if (Platform::input->HasInputPending())
 			{
 				// Don't get stuck rendering a lot if there is input pending
