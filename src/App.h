@@ -138,7 +138,6 @@ private:
 	void ShowNoHTTPSPage();
 	void ShowDownloadDialogPage();
 	void ShowDownloadProgressPage(const char* savePath);
-	void ShowDownloadEndedPage(const char* message);
 	void FinishFileDownload();
 	void SetBulkTransferActive(bool active);
 	void PumpBulkTransfer();

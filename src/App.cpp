@@ -60,6 +60,30 @@ static void FormatLoadProgress(char* buffer, int bufferSize, const char* prefix,
 	}
 }
 
+static long CalculateTransferSpeedKbps(long bytes, clock_t elapsedTicks)
+{
+	if (elapsedTicks <= 0)
+	{
+		return 0;
+	}
+	return ((bytes / 1024L) * CLOCKS_PER_SEC) / (long)elapsedTicks;
+}
+
+static void FormatDownloadProgress(char* buffer, int bufferSize, LoadTask& loadTask, clock_t startTicks, clock_t now)
+{
+	char progress[48];
+	FormatLoadProgress(progress, sizeof(progress), "Downloading", loadTask);
+	long speedKbps = CalculateTransferSpeedKbps(loadTask.GetBytesDownloaded(), startTicks ? (now - startTicks) : 0);
+	if (speedKbps > 0)
+	{
+		snprintf(buffer, bufferSize, "%s [%ld KB/s]", progress, speedKbps);
+	}
+	else
+	{
+		snprintf(buffer, bufferSize, "%s", progress);
+	}
+}
+
 static void FormatDownloadResult(char* buffer, int bufferSize, long bytes, clock_t elapsedTicks)
 {
 	char downloaded[16];
@@ -76,8 +100,8 @@ static void FormatDownloadResult(char* buffer, int bufferSize, long bytes, clock
 	}
 	long seconds = elapsedMs / 1000L;
 	long tenths = (elapsedMs % 1000L) / 100L;
-	long speedKbps = ((bytes / 1024L) * CLOCKS_PER_SEC) / (long)elapsedTicks;
-	snprintf(buffer, bufferSize, "Downloaded %s in %ld.%ld sec (%ld KB/s)", downloaded, seconds, tenths, speedKbps);
+	long speedKbps = CalculateTransferSpeedKbps(bytes, elapsedTicks);
+	snprintf(buffer, bufferSize, "Download complete: %s in %ld.%ld sec (%ld KB/s)", downloaded, seconds, tenths, speedKbps);
 }
 
 static unsigned long ParseByteSize(const char* value)
@@ -488,6 +512,11 @@ void App::Run(int argc, char* argv[])
 				}
 				else
 				{
+					if (pageLoadTask.downloadFile && pageLoadTask.IsDownloadComplete())
+					{
+						FinishFileDownload();
+						break;
+					}
 					HandleEmptyRead("page", pageLoadTask, pageLoadStatsTime);
 					break;
 				}
@@ -503,18 +532,26 @@ void App::Run(int argc, char* argv[])
 			}
 			if (totalBytesRead && pageLoadTask.type == LoadTask::RemoteFile)
 			{
-				char statusMessage[64];
+				char statusMessage[96];
 				if (pageLoadTask.downloadFile && pageLoadTask.IsDownloadComplete())
 				{
 					FinishFileDownload();
 				}
-				else if (pageLoadTask.IsDownloadComplete())
+				else if (!pageLoadTask.downloadFile && pageLoadTask.IsDownloadComplete())
 				{
 					ui.SetStatusMessage("Loading complete", StatusBarNode::GeneralStatus);
 				}
 				else
 				{
-					FormatLoadProgress(statusMessage, sizeof(statusMessage), pageLoadTask.downloadFile ? "Downloading" : "Loading", pageLoadTask);
+					if (pageLoadTask.downloadFile)
+					{
+						clock_t startTicks = bulkTransferFirstByteTime ? bulkTransferFirstByteTime : bulkTransferStartTime;
+						FormatDownloadProgress(statusMessage, sizeof(statusMessage), pageLoadTask, startTicks, clock());
+					}
+					else
+					{
+						FormatLoadProgress(statusMessage, sizeof(statusMessage), "Loading", pageLoadTask);
+					}
 					ui.SetStatusMessage(statusMessage, StatusBarNode::GeneralStatus);
 				}
 				if (pageLoadTask.downloadFile)
@@ -903,10 +940,23 @@ size_t LoadTask::GetContent(char* buffer, size_t count)
 				Stop();
 				break;
 			case HTTPRequest::Finished:
+				bytesDownloaded = request->GetBytesDownloaded();
+				contentSize = request->GetContentSize();
 				downloadComplete = true;
+				if (downloadFile)
+				{
+					break;
+				}
 				Stop();
 				break;
 			case HTTPRequest::Stopped:
+				bytesDownloaded = request->GetBytesDownloaded();
+				contentSize = request->GetContentSize();
+				if (downloadFile)
+				{
+					downloadComplete = true;
+					break;
+				}
 				Stop();
 				break;
 			}
@@ -977,7 +1027,7 @@ bool LoadTask::IsDownloadComplete()
 	{
 		long requestContentSize = request->GetContentSize();
 		long requestBytesDownloaded = request->GetBytesDownloaded();
-		return request->GetStatus() == HTTPRequest::Finished || (requestContentSize > 0 && requestBytesDownloaded >= requestContentSize);
+		return downloadComplete || request->GetStatus() == HTTPRequest::Finished || (requestContentSize > 0 && requestBytesDownloaded >= requestContentSize);
 	}
 	return downloadComplete;
 }
@@ -1053,7 +1103,7 @@ void App::FinishFileDownload()
 	pageLoadTask.downloadFile = NULL;
 	fclose(completedFile);
 	pageLoadTask.Stop();
-	ShowDownloadEndedPage(downloadResult);
+	ui.SetStatusMessage(downloadResult, StatusBarNode::GeneralStatus);
 }
 
 void App::SetBulkTransferActive(bool active)
@@ -1391,15 +1441,6 @@ void App::ShowDownloadProgressPage(const char* savePath)
 	parser.Finish();
 }
 
-void App::ShowDownloadEndedPage(const char* message)
-{
-	ResetPage();
-	parser.Write("<html><body><center><h1>");
-	parser.Write(message);
-	parser.Write("</h1></center></body></html>");
-	parser.Finish();
-}
-
 void App::ShowDownloadDialogPage()
 {
 	char temp[32];
@@ -1499,6 +1540,6 @@ void App::CancelFileDownload()
 	if (pageLoadTask.downloadFile)
 	{
 		StopLoad();
-		ShowDownloadEndedPage("Download cancelled");
+		ui.SetStatusMessage("Download cancelled", StatusBarNode::GeneralStatus);
 	}
 }
