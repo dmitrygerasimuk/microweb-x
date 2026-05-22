@@ -95,6 +95,7 @@ void __interrupt __far Timer_tick_handler( ) {
 
 
 void Timer_start( void ) {
+  if ( timer_hooked ) return;
   disable_ints( );
   Timer_old_tick_handler = getvect( 0x1c );
   setvect( 0x1c, Timer_tick_handler );

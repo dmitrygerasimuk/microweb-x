@@ -232,6 +232,7 @@ class Dns {
 
     static int8_t init( void );
     static void   stop( void );
+    static void   setInitialSendSpin( uint8_t enabled );
 
     // High level function to resolve a name
     // -1: Parm error (name too long)

@@ -33,6 +33,49 @@ VideoDriver* Platform::video = nullptr;
 InputDriver* Platform::input = nullptr;
 NetworkDriver* Platform::network = nullptr;
 
+static bool platformExitCleanupRegistered = false;
+static bool platformShutdownStarted = false;
+
+static void ShutdownDOSPlatformDevices()
+{
+	if (platformShutdownStarted)
+	{
+		return;
+	}
+	platformShutdownStarted = true;
+
+	MemoryDebugLog("BOOT dos platform cleanup begin");
+	if (Platform::network)
+	{
+		MemoryDebugLog("BOOT net shutdown begin");
+		Platform::network->Shutdown();
+		MemoryDebugLog("BOOT net shutdown done");
+	}
+	if (Platform::input)
+	{
+		MemoryDebugLog("BOOT input shutdown begin");
+		Platform::input->Shutdown();
+		MemoryDebugLog("BOOT input shutdown done");
+	}
+	MemoryManager::pageBlockAllocator.Shutdown();
+	if (Platform::video)
+	{
+		MemoryDebugLog("BOOT video shutdown begin");
+		Platform::video->Shutdown();
+		MemoryDebugLog("BOOT video shutdown done");
+	}
+	delete Platform::video;
+	Platform::video = nullptr;
+	Platform::input = nullptr;
+	Platform::network = nullptr;
+	MemoryDebugLog("BOOT dos platform cleanup done");
+}
+
+static void PlatformExitCleanup()
+{
+	ShutdownDOSPlatformDevices();
+}
+
 /*
 	Find6845
 	
@@ -201,6 +244,11 @@ static bool HasCommandLineArg(int argc, char* argv[], const char* arg)
 bool Platform::Init(int argc, char* argv[])
 {
 	MemoryDebugLog("BOOT dos platform init begin");
+	if (!platformExitCleanupRegistered)
+	{
+		atexit(PlatformExitCleanup);
+		platformExitCleanupRegistered = true;
+	}
 	if (HasCommandLineArg(argc, argv, "-nonet"))
 	{
 		MemoryDebugLog("BOOT net skipped by -nonet");
@@ -214,6 +262,11 @@ bool Platform::Init(int argc, char* argv[])
 		{
 			MemoryDebugLog("BOOT net legacy pump enabled");
 			dosNetwork->SetLegacyPump(true);
+		}
+		if (dosNetwork && (HasCommandLineArg(argc, argv, "-dnssafe") || HasCommandLineArg(argc, argv, "-dnsconservative")))
+		{
+			MemoryDebugLog("BOOT net conservative dns enabled");
+			dosNetwork->SetConservativeDns(true);
 		}
 		network = dosNetwork;
 		if (network)
@@ -304,29 +357,7 @@ bool Platform::Init(int argc, char* argv[])
 void Platform::Shutdown()
 {
 	MemoryDebugLog("BOOT dos platform shutdown begin");
-	if (input)
-	{
-		MemoryDebugLog("BOOT input shutdown begin");
-		input->Shutdown();
-		MemoryDebugLog("BOOT input shutdown done");
-	}
-	if (network)
-	{
-		MemoryDebugLog("BOOT net shutdown begin");
-		network->Shutdown();
-		MemoryDebugLog("BOOT net shutdown done");
-	}
-	MemoryManager::pageBlockAllocator.Shutdown();
-	if (video)
-	{
-		MemoryDebugLog("BOOT video shutdown begin");
-		video->Shutdown();
-		MemoryDebugLog("BOOT video shutdown done");
-	}
-	delete video;
-	video = nullptr;
-	input = nullptr;
-	network = nullptr;
+	ShutdownDOSPlatformDevices();
 	MemoryDebugLog("BOOT dos platform shutdown done");
 }
 
@@ -347,31 +378,12 @@ void Platform::FatalError(const char* message, ...)
 	MemoryDebugLog("BOOT fatal begin");
 	va_list args;
 
-	if (input)
-	{
-		MemoryDebugLog("BOOT fatal input shutdown begin");
-		input->Shutdown();
-		MemoryDebugLog("BOOT fatal input shutdown done");
-	}
-	if (video)
-	{
-		MemoryDebugLog("BOOT fatal video shutdown begin");
-		video->Shutdown();
-		MemoryDebugLog("BOOT fatal video shutdown done");
-	}
-	if (network)
-	{
-		MemoryDebugLog("BOOT fatal net shutdown begin");
-		network->Shutdown();
-		MemoryDebugLog("BOOT fatal net shutdown done");
-	}
+	ShutdownDOSPlatformDevices();
 
 	va_start(args, message);
 	vfprintf(stderr, message, args);
 	printf("\n");
 	va_end(args);
-
-	MemoryManager::pageBlockAllocator.Shutdown();
 
 	MemoryDebugLog("BOOT fatal exit");
 	exit(1);

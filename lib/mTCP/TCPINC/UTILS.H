@@ -252,8 +252,9 @@ class Utils {
     static FILE    *CfgFile;
     static char    *CfgFilenamePtr;  // This points into our environment!
 
-    // The old Ctrl-Break handler so we can restore it in endStack.
+    // The old Ctrl-Break and Ctrl-C handlers so we can restore them in endStack.
     static void ( __interrupt __far *oldCtrlBreakHandler)( );
+    static void ( __interrupt __far *oldCtrlCHandler)( );
 
 
 };

@@ -148,6 +148,7 @@ FILE   *Utils::CfgFile = NULL;
 char   *Utils::CfgFilenamePtr = NULL;
 
 void ( __interrupt __far *Utils::oldCtrlBreakHandler)( );
+void ( __interrupt __far *Utils::oldCtrlCHandler)( );
 
 char Utils::lineBuffer[UTILS_LINEBUFFER_LEN];
 char Utils::parmName[UTILS_PARAMETER_LEN];
@@ -722,6 +723,7 @@ int8_t Utils::initStack( uint8_t tcpSockets,
   // Install the new Ctrl-Break and Ctrl-C handlers.
   //
   oldCtrlBreakHandler = getvect( 0x1b );
+  oldCtrlCHandler = getvect( 0x23 );
   setvect( 0x1b, newCtrlBreakHandler );
   setvect( 0x23, newCtrlCHandler );
 
@@ -989,10 +991,11 @@ void Utils::endStack( void ) {
 
 
   // At this point the packet driver is not active and we've unhooked from
-  // the BIOS timer tick interrupt.  Unload the users Ctrl-Break handler.
-  // (We do not need to unload a Ctrl-C handler; DOS will do that.)
+  // the BIOS timer tick interrupt.  Unload the users Ctrl-Break and Ctrl-C
+  // handlers.
   //
   setvect( 0x1b, oldCtrlBreakHandler);
+  setvect( 0x23, oldCtrlCHandler);
 
 
   // This just frees memory.

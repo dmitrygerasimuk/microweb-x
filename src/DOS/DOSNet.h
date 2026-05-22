@@ -53,6 +53,7 @@ class DOSNetworkDriver : public NetworkDriver
 public:
 	DOSNetworkDriver();
 	void SetLegacyPump(bool enabled) { legacyPump = enabled; }
+	void SetConservativeDns(bool enabled) { conservativeDns = enabled; }
 	virtual void Init();
 	virtual void Shutdown();
 	virtual void Update();
@@ -82,6 +83,7 @@ private:
 	bool isConnected;
 	bool legacyPump;
 	bool bulkTransferMode;
+	bool conservativeDns;
 };
 
 #endif

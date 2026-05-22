@@ -69,6 +69,8 @@ uint8_t Dns::queryPending = 0;
 DNS_Response_Code_t  Dns::lastQueryRc = Good;
 Dns::DNS_Pending_Rec_t Dns::pendingQuery;
 
+static uint8_t Dns_initialSendSpin = 1;
+
 
 
 // DNS cache table data and functions
@@ -229,6 +231,10 @@ int8_t Dns::init( void ) {
 
 void Dns::stop( void ) {
   Udp::unregisterCallback( DNS_HANDLER_PORT );
+}
+
+void Dns::setInitialSendSpin( uint8_t enabled ) {
+  Dns_initialSendSpin = enabled;
 }
 
 
@@ -495,6 +501,9 @@ void Dns::sendRequest( IpAddr_t resolver, const char *targetName, uint16_t ident
 
   // rc will be 0 if the packet was sent or 1 if it is pending
   // ARP resolution.
+  if ( !Dns_initialSendSpin ) {
+    return;
+  }
 
 
   // Spin and process packets until we can resolve ARP and send our request

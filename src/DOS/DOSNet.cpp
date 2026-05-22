@@ -53,6 +53,7 @@ DOSNetworkDriver::DOSNetworkDriver()
 	isConnected = false;
 	legacyPump = false;
 	bulkTransferMode = false;
+	conservativeDns = false;
 	for (int n = 0; n < MAX_CONCURRENT_HTTP_REQUESTS; n++)
 	{
 		requests[n] = NULL;
@@ -85,6 +86,8 @@ void DOSNetworkDriver::Init()
 	mTCP_releaseTimesliceEnabled = 0;
 	MemoryDebugLog("BOOT net sleep=%d releaseTimeslice disabled legacy=%d", mTCP_sleepCallEnabled, legacyPump);
 #endif
+	Dns::setInitialSendSpin(conservativeDns ? 0 : 1);
+	MemoryDebugLog("BOOT net dns conservative=%d", conservativeDns);
 
 	for (int n = 0; n < MAX_CONCURRENT_HTTP_REQUESTS; n++)
 	{
