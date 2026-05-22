@@ -2387,13 +2387,18 @@ int16_t TcpSocket::recv( uint8_t *userBuf, uint16_t userBufLen ) {
   }
 
 
-  // Zero window processing
+  // Zero/low window processing
   //
   // If our TCP receive window was closed before consuming this data then
   // send an ACK packet to the other side to let them know we are open for
-  // business again.
+  // business again.  MicroWeb can drain small chunks from a nearly full
+  // receive buffer; some peers wait for a window update even if the window was
+  // tiny instead of exactly zero, so also ACK when we reopen at least half of
+  // the buffer.
 
-  if ( origWin == 0 ) {
+  uint16_t newWin = rcvBufSize - rcvBufEntries;
+  if ( (origWin == 0) ||
+       ((origWin < (rcvBufSize >> 1)) && (newWin >= (rcvBufSize >> 1))) ) {
     sendPureAck( );
     Tcp::OurWindowReopened++;
   }
