@@ -18,6 +18,7 @@
 #include <conio.h>
 #include <memory.h>
 #include <stdint.h>
+#include <time.h>
 #include "DOSInput.h"
 #include "../Keycodes.h"
 #include "../DataPack.h"
@@ -30,6 +31,13 @@ DOSInputDriver::DOSInputDriver()
 	mouseDisabled = false;
 	skipMouseReset = false;
 	mouseStatusLogCount = 0;
+	cachedMouseStatusValid = false;
+	lastMouseStatusPollTime = -1;
+	lastMousePressPollTime = -1;
+	lastMouseReleasePollTime = -1;
+	cachedMouseButtons = 0;
+	cachedMouseX = 0;
+	cachedMouseY = 0;
 }
 
 void DOSInputDriver::DisableMouse()
@@ -98,6 +106,13 @@ void DOSInputDriver::Init()
 	queuedPressX = -1;
 	queuedPressY = -1;
 	mouseStatusLogCount = 0;
+	cachedMouseStatusValid = false;
+	lastMouseStatusPollTime = -1;
+	lastMousePressPollTime = -1;
+	lastMouseReleasePollTime = -1;
+	cachedMouseButtons = 0;
+	cachedMouseX = Platform::video->screenWidth / 2;
+	cachedMouseY = Platform::video->screenHeight / 2;
 	if (mouseDisabled)
 	{
 		MemoryDebugLog("BOOT mouse disabled");
@@ -216,6 +231,13 @@ bool DOSInputDriver::GetMouseButtonPress(int& x, int& y)
 		return true;
 	}
 
+	clock_t now = clock();
+	if (now == lastMousePressPollTime)
+	{
+		return false;
+	}
+	lastMousePressPollTime = now;
+
 	union REGS inreg, outreg;
 	inreg.x.ax = 5;
 	inreg.x.bx = 0;
@@ -229,6 +251,15 @@ bool DOSInputDriver::GetMouseButtonPress(int& x, int& y)
 	}
 	ClampMousePosition(x, y);
 
+	if (outreg.x.bx > 0)
+	{
+		cachedMouseStatusValid = true;
+		cachedMouseButtons = 1;
+		cachedMouseX = x;
+		cachedMouseY = y;
+		lastMouseStatusPollTime = now;
+	}
+
 	return (outreg.x.bx > 0);
 }
 
@@ -236,6 +267,13 @@ bool DOSInputDriver::GetMouseButtonRelease(int& x, int& y)
 {
 	if (!hasMouse)
 		return false;
+
+	clock_t now = clock();
+	if (now == lastMouseReleasePollTime)
+	{
+		return false;
+	}
+	lastMouseReleasePollTime = now;
 
 	union REGS inreg, outreg;
 	inreg.x.ax = 6;
@@ -249,6 +287,15 @@ bool DOSInputDriver::GetMouseButtonRelease(int& x, int& y)
 		x /= 2;
 	}
 	ClampMousePosition(x, y);
+
+	if (outreg.x.bx > 0)
+	{
+		cachedMouseStatusValid = true;
+		cachedMouseButtons = 0;
+		cachedMouseX = x;
+		cachedMouseY = y;
+		lastMouseStatusPollTime = now;
+	}
 
 	return (outreg.x.bx > 0);
 }
@@ -318,6 +365,15 @@ void DOSInputDriver::GetMouseStatus(int& buttons, int& x, int& y)
 		return;
 	}
 	union REGS inreg, outreg;
+	clock_t now = clock();
+	if (cachedMouseStatusValid && now == lastMouseStatusPollTime)
+	{
+		buttons = cachedMouseButtons;
+		x = cachedMouseX;
+		y = cachedMouseY;
+		return;
+	}
+
 	inreg.x.ax = 3;
 	int86(0x33, &inreg, &outreg);
 	x = outreg.x.cx;
@@ -343,6 +399,11 @@ void DOSInputDriver::GetMouseStatus(int& buttons, int& x, int& y)
 		MemoryDebugLog("MOUSE status raw=%d,%d cooked=%d,%d buttons=%d clamp=%d", rawX, rawY, x, y, buttons, wasClamped);
 		mouseStatusLogCount++;
 	}
+	cachedMouseStatusValid = true;
+	cachedMouseButtons = buttons;
+	cachedMouseX = x;
+	cachedMouseY = y;
+	lastMouseStatusPollTime = now;
 }
 
 void DOSInputDriver::ClearMouseButtonQueues()
@@ -363,6 +424,7 @@ void DOSInputDriver::ClearMouseButtonQueues()
 
 	queuedPressX = -1;
 	queuedPressY = -1;
+	cachedMouseStatusValid = false;
 }
 
 void DOSInputDriver::ClampMousePosition(int& x, int& y)

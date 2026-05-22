@@ -14,6 +14,7 @@
 
 #ifndef _DOSINPUT_H_
 #define _DOSINPUT_H_
+#include <time.h>
 #include "../Platform.h"
 
 class DOSInputDriver : public InputDriver
@@ -50,6 +51,13 @@ private:
 	bool mouseDisabled;
 	bool skipMouseReset;
 	int mouseStatusLogCount;
+	bool cachedMouseStatusValid;
+	clock_t lastMouseStatusPollTime;
+	clock_t lastMousePressPollTime;
+	clock_t lastMouseReleasePollTime;
+	int cachedMouseButtons;
+	int cachedMouseX;
+	int cachedMouseY;
 
 	int queuedPressX, queuedPressY;
 	int lastMouseX, lastMouseY;
