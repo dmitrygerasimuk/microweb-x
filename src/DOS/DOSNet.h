@@ -52,9 +52,12 @@ class DOSNetworkDriver : public NetworkDriver
 {
 public:
 	DOSNetworkDriver();
+	void SetLegacyPump(bool enabled) { legacyPump = enabled; }
 	virtual void Init();
 	virtual void Shutdown();
 	virtual void Update();
+	virtual void UpdateIdle();
+	virtual void SetBulkTransferMode(bool enabled) override { bulkTransferMode = enabled; }
 
 	virtual bool IsConnected() { return isConnected; }
 
@@ -68,10 +71,17 @@ public:
 	virtual void DestroySocket(NetworkTCPSocket* socket) override;
 
 private:
+	void DriveLegacyNetwork();
+	void DriveNetwork(bool allowSleep);
+	void ProcessPackets(bool allowSleep);
+	void DriveRequests();
+
 	HTTPRequest* requests[MAX_CONCURRENT_HTTP_REQUESTS];
 	DOSTCPSocket* sockets[MAX_CONCURRENT_HTTP_REQUESTS];
 
 	bool isConnected;
+	bool legacyPump;
+	bool bulkTransferMode;
 };
 
 #endif

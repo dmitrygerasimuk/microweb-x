@@ -51,6 +51,8 @@ void __interrupt __far ctrlBreakHandler() {
 DOSNetworkDriver::DOSNetworkDriver()
 {
 	isConnected = false;
+	legacyPump = false;
+	bulkTransferMode = false;
 	for (int n = 0; n < MAX_CONCURRENT_HTTP_REQUESTS; n++)
 	{
 		requests[n] = NULL;
@@ -79,6 +81,10 @@ void DOSNetworkDriver::Init()
 		printf("Failed to initialize TCP/IP\n");
 		return;
 	}
+#ifdef SLEEP_CALLS
+	mTCP_releaseTimesliceEnabled = 0;
+	MemoryDebugLog("BOOT net sleep=%d releaseTimeslice disabled legacy=%d", mTCP_sleepCallEnabled, legacyPump);
+#endif
 
 	for (int n = 0; n < MAX_CONCURRENT_HTTP_REQUESTS; n++)
 	{
@@ -99,6 +105,7 @@ void DOSNetworkDriver::Init()
 
 	printf("Network interface initialised\n");
 	isConnected = true;
+	bulkTransferMode = false;
 	MemoryDebugLog("BOOT net init complete");
 }
 
@@ -133,15 +140,80 @@ void DOSNetworkDriver::Update()
 {
 	if (isConnected)
 	{
-		PACKET_PROCESS_MULT(5);
-		Arp::driveArp();
-		Tcp::drivePackets();
-		Dns::drivePendingQuery();
-
-		for (int n = 0; n < MAX_CONCURRENT_HTTP_REQUESTS; n++)
+		if (legacyPump || bulkTransferMode)
 		{
-			requests[n]->Update();
+			DriveLegacyNetwork();
 		}
+		else
+		{
+			DriveNetwork(false);
+		}
+	}
+}
+
+void DOSNetworkDriver::UpdateIdle()
+{
+	if (isConnected)
+	{
+		if (legacyPump || bulkTransferMode)
+		{
+			DriveLegacyNetwork();
+		}
+		else
+		{
+			DriveNetwork(true);
+		}
+	}
+}
+
+void DOSNetworkDriver::DriveLegacyNetwork()
+{
+	PACKET_PROCESS_MULT(5);
+	Arp::driveArp();
+	Tcp::drivePackets();
+	Dns::drivePendingQuery();
+	DriveRequests();
+}
+
+void DOSNetworkDriver::DriveNetwork(bool allowSleep)
+{
+	ProcessPackets(allowSleep);
+	Arp::driveArp();
+	Tcp::drivePackets();
+	Dns::drivePendingQuery();
+	DriveRequests();
+}
+
+void DOSNetworkDriver::DriveRequests()
+{
+	for (int n = 0; n < MAX_CONCURRENT_HTTP_REQUESTS; n++)
+	{
+		requests[n]->Update();
+	}
+}
+
+void DOSNetworkDriver::ProcessPackets(bool allowSleep)
+{
+	if (allowSleep)
+	{
+		PACKET_PROCESS_MULT(5);
+	}
+	else
+	{
+		uint8_t i = 0;
+		while (i < 5)
+		{
+			if (Buffer_first != Buffer_next)
+			{
+				Packet_process_internal();
+			}
+			else
+			{
+				break;
+			}
+			i++;
+		}
+		IP_FRAGS_CHECK_OVERDUE();
 	}
 }
 

@@ -209,7 +209,13 @@ bool Platform::Init(int argc, char* argv[])
 	else
 	{
 		MemoryDebugLog("BOOT net alloc begin");
-		network = new DOSNetworkDriver();
+		DOSNetworkDriver* dosNetwork = new DOSNetworkDriver();
+		if (dosNetwork && HasCommandLineArg(argc, argv, "-netlegacy"))
+		{
+			MemoryDebugLog("BOOT net legacy pump enabled");
+			dosNetwork->SetLegacyPump(true);
+		}
+		network = dosNetwork;
 		if (network)
 		{
 			MemoryDebugLog("BOOT net init begin");

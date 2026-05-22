@@ -64,6 +64,8 @@ public:
 	virtual void Init() {}
 	virtual void Shutdown() {}
 	virtual void Update() {}
+	virtual void UpdateIdle() { Update(); }
+	virtual void SetBulkTransferMode(bool) {}
 
 	virtual bool IsConnected() { return false; }
 
