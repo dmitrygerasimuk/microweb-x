@@ -16,6 +16,7 @@
 #define _APP_H_
 
 #include <stdio.h>
+#include <time.h>
 #include "Parser.h"
 #include "Page.h"
 #include "URL.h"
@@ -34,6 +35,7 @@
 #define MAX_PAGE_HISTORY_BUFFER_SIZE MAX_URL_LENGTH
 #define APP_LOAD_BUFFER_SIZE 512
 #define UPDATE_TIME_SLICE (CLOCKS_PER_SEC / 5)		// 200ms time slices for rendering / parsing content buffers
+#define DEFAULT_BULK_PUMP_BYTES 0UL
 
 class HTTPRequest;
 struct HTTPOptions;
@@ -46,6 +48,7 @@ struct LoadTask
 	void Stop();
 	bool HasContent();
 	bool IsBusy();
+	bool NeedsNetworkIdle();
 	size_t GetContent(char* buffer, size_t count);
 	const char* GetURL();
 	const char* GetContentType();
@@ -87,7 +90,11 @@ struct AppConfig
 	bool useXMS : 1;
 	bool debugMemoryLog : 1;
 	bool transliterateCyrillic : 1;
+	bool legacyNetworkPump : 1;
+	bool pageDrain : 1;
+	bool networkStats : 1;
 	unsigned int linearAllocatorChunkSize;
+	unsigned long bulkPumpBytes;
 };
 
 class App
@@ -109,6 +116,7 @@ public:
 	void BeginFileDownload(const char* savePath);
 	void CancelFileDownload();
 	void ShowErrorPage(const char* message);
+	bool IsBulkTransferActive() const { return bulkTransferActive; }
 
 	static App& Get() { return *app; }
 
@@ -131,8 +139,18 @@ private:
 	void ShowDownloadDialogPage();
 	void ShowDownloadProgressPage(const char* savePath);
 	void ShowDownloadEndedPage(const char* message);
+	void FinishFileDownload();
+	void SetBulkTransferActive(bool active);
+	void PumpBulkTransfer();
+	void MaybeLogBulkTransferStats(bool force = false);
+	void LogLoadTaskNetStats(const char* name, LoadTask& task, bool force = false);
+	void MaybeLogLoopNetStats(bool force = false);
+	void LogZeroReadNetStats(const char* name, LoadTask& task, clock_t& lastLogTime, bool includeTarget = false);
+	void HandleEmptyRead(const char* name, LoadTask& task, clock_t& lastLogTime, bool includeTarget = false);
+	void UpdateIdleNetwork();
 
 	bool requestedNewPage;
+	bool bulkTransferActive;
 	Node* loadTaskTargetNode;
 	bool running;
 
@@ -140,6 +158,24 @@ private:
 	char* pageHistoryPtr;
 
 	static App* app;
+
+	clock_t bulkTransferStartTime;
+	clock_t bulkTransferFirstByteTime;
+	clock_t bulkTransferLastStatsTime;
+	long bulkTransferLastStatsBytes;
+	unsigned long bulkTransferReadCalls;
+	unsigned long bulkTransferZeroReads;
+	unsigned long bulkTransferPumpCalls;
+
+	int pageLoadStatsStatus;
+	int pageContentStatsStatus;
+	char pageLoadStatsText[48];
+	char pageContentStatsText[48];
+	long pageLoadStatsBytes;
+	long pageContentStatsBytes;
+	clock_t pageLoadStatsTime;
+	clock_t pageContentStatsTime;
+	clock_t loopStatsTime;
 
 	char loadBuffer[APP_LOAD_BUFFER_SIZE];
 };

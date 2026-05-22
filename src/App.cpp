@@ -13,8 +13,10 @@
 //
 
 #include <direct.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "App.h"
 #include "Platform.h"
 #include "HTTP.h"
@@ -46,7 +48,6 @@ static void FormatLoadProgress(char* buffer, int bufferSize, const char* prefix,
 	char downloaded[16];
 	char total[16];
 	long contentSize = loadTask.GetContentSize();
-
 	FormatByteCount(downloaded, sizeof(downloaded), loadTask.GetBytesDownloaded());
 	if (contentSize > 0)
 	{
@@ -59,20 +60,38 @@ static void FormatLoadProgress(char* buffer, int bufferSize, const char* prefix,
 	}
 }
 
-static unsigned int ParseLinearAllocatorChunkSize(const char* value)
+static void FormatDownloadResult(char* buffer, int bufferSize, long bytes, clock_t elapsedTicks)
+{
+	char downloaded[16];
+	FormatByteCount(downloaded, sizeof(downloaded), bytes);
+	if (elapsedTicks <= 0)
+	{
+		elapsedTicks = 1;
+	}
+
+	long elapsedMs = ((long)elapsedTicks * 1000L) / CLOCKS_PER_SEC;
+	if (elapsedMs <= 0)
+	{
+		elapsedMs = 1;
+	}
+	long seconds = elapsedMs / 1000L;
+	long tenths = (elapsedMs % 1000L) / 100L;
+	long speedKbps = ((bytes / 1024L) * CLOCKS_PER_SEC) / (long)elapsedTicks;
+	snprintf(buffer, bufferSize, "Downloaded %s in %ld.%ld sec (%ld KB/s)", downloaded, seconds, tenths, speedKbps);
+}
+
+static unsigned long ParseByteSize(const char* value)
 {
 	if (!value || !*value)
 	{
 		return 0;
 	}
-
 	char* end = NULL;
 	unsigned long size = strtoul(value, &end, 10);
 	if (!size)
 	{
 		return 0;
 	}
-
 	if (end && (*end == 'k' || *end == 'K'))
 	{
 		size *= 1024;
@@ -81,8 +100,84 @@ static unsigned int ParseLinearAllocatorChunkSize(const char* value)
 	{
 		size *= 1024;
 	}
+	return size;
+}
 
-	return (unsigned int)size;
+static unsigned int ParseLinearAllocatorChunkSize(const char* value)
+{
+	return (unsigned int)ParseByteSize(value);
+}
+
+static bool IsCommandLineArg(const char* value, const char* arg)
+{
+	if (!value || !arg)
+	{
+		return false;
+	}
+	if (*value == '-' || *value == '/')
+	{
+		value++;
+	}
+	if (*arg == '-' || *arg == '/')
+	{
+		arg++;
+	}
+	return !stricmp(value, arg);
+}
+
+static void NetworkStatsReset()
+{
+	FILE* file = fopen("NETSTAT.TXT", "w");
+	if (!file)
+	{
+		file = fopen("C:\\NETSTAT.TXT", "w");
+	}
+	if (file)
+	{
+		fprintf(file, "NETSTAT enabled\n");
+		fclose(file);
+	}
+}
+
+static void NetworkStatsLog(const char* fmt, ...)
+{
+	FILE* file = fopen("NETSTAT.TXT", "a");
+	if (!file)
+	{
+		file = fopen("C:\\NETSTAT.TXT", "a");
+	}
+	if (!file)
+	{
+		return;
+	}
+
+	va_list args;
+	va_start(args, fmt);
+	vfprintf(file, fmt, args);
+	va_end(args);
+	fprintf(file, "\n");
+	fclose(file);
+}
+
+static const char* NetworkStatsTaskName(LoadTask* task)
+{
+	if (task == &App::Get().pageLoadTask)
+	{
+		return "page";
+	}
+	if (task == &App::Get().pageContentLoadTask)
+	{
+		return "content";
+	}
+	return "task";
+}
+
+static void PumpNetwork()
+{
+	if (!App::config.legacyNetworkPump && !App::Get().IsBulkTransferActive() && Platform::network)
+	{
+		Platform::network->Update();
+	}
 }
 
 App::App() 
@@ -90,7 +185,23 @@ App::App()
 {
 	app = this;
 	requestedNewPage = false;
-
+	bulkTransferActive = false;
+	bulkTransferStartTime = 0;
+	bulkTransferFirstByteTime = 0;
+	bulkTransferLastStatsTime = 0;
+	bulkTransferLastStatsBytes = 0;
+	bulkTransferReadCalls = 0;
+	bulkTransferZeroReads = 0;
+	bulkTransferPumpCalls = 0;
+	pageLoadStatsStatus = -1;
+	pageContentStatsStatus = -1;
+	pageLoadStatsText[0] = '\0';
+	pageContentStatsText[0] = '\0';
+	pageLoadStatsBytes = -1;
+	pageContentStatsBytes = -1;
+	pageLoadStatsTime = 0;
+	pageContentStatsTime = 0;
+	loopStatsTime = 0;
 	memset(pageHistoryBuffer, 0, MAX_PAGE_HISTORY_BUFFER_SIZE);
 	pageHistoryPtr = pageHistoryBuffer;
 }
@@ -99,7 +210,6 @@ App::~App()
 {
 	app = NULL;
 }
-
 
 void App::ResetPage()
 {
@@ -115,7 +225,6 @@ void App::Run(int argc, char* argv[])
 {
 	running = true;
 	char* targetURL = nullptr;
-
 	config.loadImages = true;
 	config.dumpPage = false;
 	config.useSwap = false;
@@ -123,53 +232,73 @@ void App::Run(int argc, char* argv[])
 	config.useXMS = true;
 	config.debugMemoryLog = false;
 	config.transliterateCyrillic = false;
+	config.legacyNetworkPump = false;
+	config.pageDrain = false;
+	config.networkStats = false;
+	config.bulkPumpBytes = DEFAULT_BULK_PUMP_BYTES;
 	config.linearAllocatorChunkSize = LinearAllocator::DefaultChunkSize();
-
 	if (argc > 1)
 	{
 		for (int n = 1; n < argc; n++)
 		{
-			if (*argv[n] != '-')
+			if (IsCommandLineArg(argv[n], "netstats") || IsCommandLineArg(argv[n], "netstat") ||
+				IsCommandLineArg(argv[n], "downloadstats"))
+			{
+				config.networkStats = true;
+			}
+			else if (*argv[n] != '-' && *argv[n] != '/')
 			{
 				if (!targetURL)
 				{
 					targetURL = argv[n];
 				}
 			}
-			else if (!stricmp(argv[n], "-noimages"))
+			else if (IsCommandLineArg(argv[n], "noimages"))
 			{
 				config.loadImages = false;
 			}
-			else if (!stricmp(argv[n], "-dumppage"))
+			else if (IsCommandLineArg(argv[n], "dumppage"))
 			{
 				config.dumpPage = true;
 			}
-			else if (!stricmp(argv[n], "-invert"))
+			else if (IsCommandLineArg(argv[n], "invert"))
 			{
 				config.invertScreen = true;
 			}
-			else if (!stricmp(argv[n], "-useswap"))
+			else if (IsCommandLineArg(argv[n], "useswap"))
 			{
 				config.useSwap = true;
 			}
-			else if (!stricmp(argv[n], "-noems"))
+			else if (IsCommandLineArg(argv[n], "noems"))
 			{
 				config.useEMS = false;
 			}
-			else if (!stricmp(argv[n], "-noxms"))
+			else if (IsCommandLineArg(argv[n], "noxms"))
 			{
 				config.useXMS = false;
 			}
-			else if (!stricmp(argv[n], "-debug") || !stricmp(argv[n], "-debugmem") ||
-				!stricmp(argv[n], "-memlog") || !stricmp(argv[n], "-bootlog"))
+			else if (IsCommandLineArg(argv[n], "debug") || IsCommandLineArg(argv[n], "debugmem") ||
+				IsCommandLineArg(argv[n], "memlog") || IsCommandLineArg(argv[n], "bootlog"))
 			{
 				config.debugMemoryLog = true;
 			}
-			else if (!stricmp(argv[n], "-translit") || !stricmp(argv[n], "-transliterate"))
+			else if (IsCommandLineArg(argv[n], "translit") || IsCommandLineArg(argv[n], "transliterate"))
 			{
 				config.transliterateCyrillic = true;
 			}
-			else if (strstr(argv[n], "-linalloc=") == argv[n])
+			else if (IsCommandLineArg(argv[n], "netlegacy"))
+			{
+				config.legacyNetworkPump = true;
+			}
+			else if (IsCommandLineArg(argv[n], "pagedrain"))
+			{
+				config.pageDrain = true;
+			}
+			else if (strstr(argv[n], "-bulkpump=") == argv[n] || strstr(argv[n], "/bulkpump=") == argv[n])
+			{
+				config.bulkPumpBytes = ParseByteSize(argv[n] + 10);
+			}
+			else if (strstr(argv[n], "-linalloc=") == argv[n] || strstr(argv[n], "/linalloc=") == argv[n])
 			{
 				unsigned int chunkSize = ParseLinearAllocatorChunkSize(argv[n] + 10);
 				if (chunkSize)
@@ -177,7 +306,7 @@ void App::Run(int argc, char* argv[])
 					config.linearAllocatorChunkSize = chunkSize;
 				}
 			}
-			else if (!stricmp(argv[n], "-linalloc") && n + 1 < argc)
+			else if (IsCommandLineArg(argv[n], "linalloc") && n + 1 < argc)
 			{
 				unsigned int chunkSize = ParseLinearAllocatorChunkSize(argv[n + 1]);
 				if (chunkSize)
@@ -188,22 +317,36 @@ void App::Run(int argc, char* argv[])
 			}
 		}
 	}
-
 	MemoryDebugLogSetEnabled(config.debugMemoryLog);
-	MemoryDebugLog("BOOT app config parsed images=%d ems=%d xms=%d swap=%d", config.loadImages, config.useEMS, config.useXMS, config.useSwap);
+	if (config.networkStats)
+	{
+		NetworkStatsReset();
+		NetworkStatsLog("config netlegacy=%d pagedrain=%d bulkpump=%lu clocksPerSec=%ld",
+			config.legacyNetworkPump, config.pageDrain, config.bulkPumpBytes, (long)CLOCKS_PER_SEC);
+		pageLoadStatsStatus = -1;
+		pageContentStatsStatus = -1;
+		pageLoadStatsText[0] = '\0';
+		pageContentStatsText[0] = '\0';
+		pageLoadStatsBytes = -1;
+		pageContentStatsBytes = -1;
+		pageLoadStatsTime = clock();
+		pageContentStatsTime = pageLoadStatsTime;
+		loopStatsTime = pageLoadStatsTime;
+	}
+	MemoryDebugLog("BOOT app config parsed images=%d ems=%d xms=%d swap=%d netlegacy=%d pagedrain=%d netstats=%d bulkpump=%lu",
+		config.loadImages, config.useEMS, config.useXMS, config.useSwap, config.legacyNetworkPump,
+		config.pageDrain, config.networkStats, config.bulkPumpBytes);
 	MemoryManager::pageAllocator.SetChunkSize(config.linearAllocatorChunkSize);
 	MemoryDebugLog("LINALLOC config chunk=%u", (unsigned)MemoryManager::pageAllocator.GetChunkSize());
 	MemoryDebugLog("BOOT memblock init begin");
 	MemoryManager::pageBlockAllocator.Init();
 	MemoryDebugLog("BOOT memblock init done");
-
 	if (config.loadImages)
 	{
 		MemoryDebugLog("BOOT image decoder allocate begin");
 		ImageDecoder::Allocate();
 		MemoryDebugLog("BOOT image decoder allocate done");
 	}
-
 	MemoryDebugLog("BOOT style pool init begin");
 	StylePool::Get().Init();
 	MemoryDebugLog("BOOT style pool init done");
@@ -216,7 +359,6 @@ void App::Run(int argc, char* argv[])
 	MemoryDebugLog("BOOT page renderer init begin");
 	pageRenderer.Init();
 	MemoryDebugLog("BOOT page renderer init done");
-
 	if (targetURL)
 	{
 		MemoryDebugLog("BOOT initial open url begin");
@@ -229,7 +371,6 @@ void App::Run(int argc, char* argv[])
 		ui.FocusNode(ui.addressBarNode);
 		MemoryDebugLog("BOOT initial focus address done");
 	}
-
 	bool firstLoop = true;
 	MemoryDebugLog("BOOT app main loop begin");
 	while (running)
@@ -249,7 +390,8 @@ void App::Run(int argc, char* argv[])
 		{
 			MemoryDebugLog("BOOT first loop mouse refresh done");
 		}
-
+		LogLoadTaskNetStats("page", pageLoadTask);
+		LogLoadTaskNetStats("content", pageContentLoadTask);
 		bool pageLoadHasContent = pageLoadTask.HasContent();
 		if (firstLoop)
 		{
@@ -291,20 +433,24 @@ void App::Run(int argc, char* argv[])
 						}
 					}
 				}
-
 				requestedNewPage = false;
 				if (firstLoop)
 				{
 					MemoryDebugLog("BOOT first loop page load requested done");
 				}
 			}
-
 			if (firstLoop)
 			{
 				MemoryDebugLog("BOOT first loop page load read begin");
 			}
+			bool drainPageLoad = config.pageDrain && !pageLoadTask.downloadFile && pageLoadTask.type == LoadTask::RemoteFile;
 			clock_t loadEndTime = clock() + UPDATE_TIME_SLICE;
 			size_t totalBytesRead = 0;
+			unsigned long bulkBytesSincePump = 0;
+			if (drainPageLoad)
+			{
+				PumpNetwork();
+			}
 			do 
 			{
 				size_t bytesRead = pageLoadTask.GetContent(loadBuffer, APP_LOAD_BUFFER_SIZE);
@@ -313,7 +459,23 @@ void App::Run(int argc, char* argv[])
 					totalBytesRead += bytesRead;
 					if (pageLoadTask.downloadFile)
 					{
+						if (!bulkTransferFirstByteTime)
+						{
+							bulkTransferFirstByteTime = clock();
+							if (config.networkStats)
+							{
+								long setupMs = ((long)(bulkTransferFirstByteTime - bulkTransferStartTime) * 1000L) / CLOCKS_PER_SEC;
+								NetworkStatsLog("firstByte ticks=%ld setupMs=%ld", (long)(bulkTransferFirstByteTime - bulkTransferStartTime), setupMs);
+							}
+						}
 						fwrite(loadBuffer, 1, bytesRead, pageLoadTask.downloadFile);
+						bulkTransferReadCalls++;
+						bulkBytesSincePump += bytesRead;
+						if (config.bulkPumpBytes && bulkBytesSincePump >= config.bulkPumpBytes)
+						{
+							PumpBulkTransfer();
+							bulkBytesSincePump = 0;
+						}
 					}
 					else
 					{
@@ -321,30 +483,43 @@ void App::Run(int argc, char* argv[])
 						{
 							fwrite(loadBuffer, 1, bytesRead, pageLoadTask.debugDumpFile);
 						}
-
 						parser.Parse(loadBuffer, bytesRead);
 					}
 				}
-				else break;
-
+				else
+				{
+					HandleEmptyRead("page", pageLoadTask, pageLoadStatsTime);
+					break;
+				}
+				if (!pageLoadTask.downloadFile)
+				{
+					PumpNetwork();
+				}
 				Platform::input->RefreshMouse();
 			} while (clock() < loadEndTime && !Platform::input->HasInputPending());
 			if (firstLoop)
 			{
 				MemoryDebugLog("BOOT first loop page load read done bytes=%u", (unsigned)totalBytesRead);
 			}
-
 			if (totalBytesRead && pageLoadTask.type == LoadTask::RemoteFile)
 			{
 				char statusMessage[64];
-				if (pageLoadTask.IsDownloadComplete())
+				if (pageLoadTask.downloadFile && pageLoadTask.IsDownloadComplete())
 				{
-					ui.SetStatusMessage(pageLoadTask.downloadFile ? "Download complete" : "Loading complete", StatusBarNode::GeneralStatus);
+					FinishFileDownload();
+				}
+				else if (pageLoadTask.IsDownloadComplete())
+				{
+					ui.SetStatusMessage("Loading complete", StatusBarNode::GeneralStatus);
 				}
 				else
 				{
 					FormatLoadProgress(statusMessage, sizeof(statusMessage), pageLoadTask.downloadFile ? "Downloading" : "Loading", pageLoadTask);
 					ui.SetStatusMessage(statusMessage, StatusBarNode::GeneralStatus);
+				}
+				if (pageLoadTask.downloadFile)
+				{
+					MaybeLogBulkTransferStats();
 				}
 			}
 			
@@ -394,9 +569,7 @@ void App::Run(int argc, char* argv[])
 			{
 				if (!pageLoadTask.IsBusy())
 				{
-					fclose(pageLoadTask.downloadFile);
-					pageLoadTask.downloadFile = NULL;
-					ShowDownloadEndedPage("Download complete!");
+					FinishFileDownload();
 				}
 			}
 			else if (!parser.IsFinished())
@@ -420,7 +593,10 @@ void App::Run(int argc, char* argv[])
 		{
 			MemoryDebugLog("BOOT first loop page load done");
 		}
-
+		if (bulkTransferActive && !pageLoadTask.downloadFile)
+		{
+			SetBulkTransferActive(false);
+		}
 		bool pageContentHasContent = pageContentLoadTask.HasContent();
 		if (firstLoop)
 		{
@@ -443,17 +619,25 @@ void App::Run(int argc, char* argv[])
 						pageContentLoadTask.Stop();
 					}
 				}
-				else break;
-
+				else
+				{
+					HandleEmptyRead("content", pageContentLoadTask, pageContentStatsTime, true);
+					break;
+				}
+				PumpNetwork();
 				Platform::input->RefreshMouse();
 			} while (clock() < contentLoadEndTime && !Platform::input->HasInputPending());
-
 			if (totalBytesRead && pageContentLoadTask.type == LoadTask::RemoteFile)
 			{
 				char statusMessage[64];
 				if (pageContentLoadTask.IsDownloadComplete())
 				{
 					ui.SetStatusMessage("Image loaded", StatusBarNode::GeneralStatus);
+					if (config.networkStats)
+					{
+						NetworkStatsLog("content image-loaded ticks=%ld bytes=%ld target=%p",
+							(long)clock(), pageContentLoadTask.GetBytesDownloaded(), loadTaskTargetNode);
+					}
 				}
 				else
 				{
@@ -470,9 +654,18 @@ void App::Run(int argc, char* argv[])
 			}
 			if (loadTaskTargetNode)
 			{
+				if (config.networkStats)
+				{
+					NetworkStatsLog("content finish begin ticks=%ld target=%p layoutFinished=%d",
+						(long)clock(), loadTaskTargetNode, page.layout.IsFinished());
+				}
 				loadTaskTargetNode->Handler().FinishContent(loadTaskTargetNode, pageContentLoadTask);
 				loadTaskTargetNode = page.ProcessNextLoadTask(loadTaskTargetNode, pageContentLoadTask);
-
+				if (config.networkStats)
+				{
+					NetworkStatsLog("content finish done ticks=%ld next=%p layoutFinished=%d pageMemErr=%d",
+						(long)clock(), loadTaskTargetNode, page.layout.IsFinished(), MemoryManager::pageAllocator.GetError());
+				}
 				if (!loadTaskTargetNode && page.layout.IsFinished())
 				{
 					if (MemoryManager::pageAllocator.GetError())
@@ -496,24 +689,29 @@ void App::Run(int argc, char* argv[])
 		}
 		//if (loadTask.type == LoadTask::RemoteFile && loadTask.request && loadTask.request->GetStatus() == HTTPRequest::Connecting)
 		//	ui.SetStatusMessage(loadTask.request->GetStatusString());
-
 		if (firstLoop)
 		{
 			MemoryDebugLog("BOOT first loop layout update begin");
 		}
+		PumpNetwork();
 		page.layout.Update();
 		if (firstLoop)
 		{
 			MemoryDebugLog("BOOT first loop layout update done");
 			MemoryDebugLog("BOOT first loop renderer update begin");
 		}
+		PumpNetwork();
 		pageRenderer.Update();
 		if (firstLoop)
 		{
 			MemoryDebugLog("BOOT first loop renderer update done");
 			MemoryDebugLog("BOOT first loop ui update begin");
 		}
+		PumpNetwork();
 		ui.Update();
+
+		UpdateIdleNetwork();
+		MaybeLogLoopNetStats();
 		if (firstLoop)
 		{
 			MemoryDebugLog("BOOT first loop ui update done");
@@ -528,9 +726,7 @@ void LoadTask::Load(HTTPRequest::RequestType requestType, const char* targetURL,
 	bytesDownloaded = 0;
 	contentSize = 0;
 	downloadComplete = false;
-
 	url = targetURL;
-
 	// Check for protocol substring
 	if (strstr(url.url, "http://") == url.url)
 	{
@@ -544,7 +740,6 @@ void LoadTask::Load(HTTPRequest::RequestType requestType, const char* targetURL,
 	else if (strstr(url.url, "https://") == url.url)
 	{
 		type = LoadTask::RemoteFile;
-
 		// Bit of a hack: try forcing http:// first
 		strcpy(url.url + 4, url.url + 5);
 	}
@@ -558,7 +753,6 @@ void LoadTask::Load(HTTPRequest::RequestType requestType, const char* targetURL,
 		// User did not include protocol, first check for local file
 		type = LoadTask::LocalFile;
 		fs = fopen(targetURL, "rb");
-
 		if (fs)
 		{
 			// Local file exists, prepend with file:// protocol
@@ -582,16 +776,18 @@ void LoadTask::Load(HTTPRequest::RequestType requestType, const char* targetURL,
 			}
 		}
 	}
-
 	url.CleanUp();
-
+	if (App::config.networkStats)
+	{
+		NetworkStatsLog("task-open %s ticks=%ld type=%d url=\"%.120s\"",
+			NetworkStatsTaskName(this), (long)clock(), (int)type, url.url);
+	}
 	if (type == LoadTask::RemoteFile)
 	{
 		request = Platform::network->CreateRequest();
 		if (request)
 		{
 			request->Open(requestType, url.url, options);
-
 			if (App::config.dumpPage && this == &App::Get().pageLoadTask)
 			{
 				debugDumpFile = fopen("dump.htm", "wb");
@@ -602,13 +798,18 @@ void LoadTask::Load(HTTPRequest::RequestType requestType, const char* targetURL,
 
 void LoadTask::Stop()
 {
+	if (App::config.networkStats)
+	{
+		NetworkStatsLog("task-stop %s ticks=%ld type=%d bytes=%ld size=%ld status=\"%s\"",
+			NetworkStatsTaskName(this), (long)clock(), (int)type, GetBytesDownloaded(), GetContentSize(),
+			(type == LoadTask::RemoteFile && request) ? request->GetStatusString() : "local");
+	}
 	if (type == LoadTask::RemoteFile && request)
 	{
 		bytesDownloaded = request->GetBytesDownloaded();
 		contentSize = request->GetContentSize();
 		downloadComplete = request->GetStatus() == HTTPRequest::Finished || (contentSize > 0 && bytesDownloaded >= contentSize);
 	}
-
 	if (debugDumpFile)
 	{
 		fclose(debugDumpFile);
@@ -619,7 +820,6 @@ void LoadTask::Stop()
 		fclose(downloadFile);
 		downloadFile = NULL;
 	}
-
 	switch (type)
 	{
 	case LoadTask::LocalFile:
@@ -651,8 +851,12 @@ const char* LoadTask::GetURL()
 
 bool LoadTask::IsBusy()
 {
-	bool isStillConnecting = type == LoadTask::RemoteFile && request && request->GetStatus() == HTTPRequest::Connecting;
-	return isStillConnecting || HasContent();
+	return NeedsNetworkIdle() || HasContent();
+}
+
+bool LoadTask::NeedsNetworkIdle()
+{
+	return type == LoadTask::RemoteFile && request && request->GetStatus() == HTTPRequest::Connecting;
 }
 
 bool LoadTask::HasContent()
@@ -742,11 +946,9 @@ const char* LoadTask::GetContentType()
 				{
 					return "text/html";
 				}
-
 				return "text/plain";
 			}
 		}
-
 		return "text/html";
 	}
 }
@@ -784,13 +986,11 @@ void App::RequestNewPage(HTTPRequest::RequestType requestType, const char* url, 
 {
 	if (!url || !*url)
 		return;
-
 	StopLoad();
 	pageLoadTask.Load(requestType, url, options);
 	requestedNewPage = true;
 	loadTaskTargetNode = nullptr;
 	//ui.UpdateAddressBar(loadTask.url);
-
 	if (pageLoadTask.type == LoadTask::RemoteFile && pageLoadTask.request)
 	{
 		ui.SetStatusMessage("Connecting to server...", StatusBarNode::GeneralStatus);
@@ -800,50 +1000,298 @@ void App::RequestNewPage(HTTPRequest::RequestType requestType, const char* url, 
 void App::OpenURL(HTTPRequest::RequestType requestType, const char* url, HTTPOptions* options)
 {
 	RequestNewPage(requestType, url, options);
-
 	size_t urlStringLength = strlen(url) + 1;
-
 	if (*pageHistoryPtr)
 	{
 		pageHistoryPtr += strlen(pageHistoryPtr) + 1;
 	}
-
 	// If not enough space in the buffer then move to previous space
 	while (pageHistoryPtr + urlStringLength > pageHistoryBuffer + MAX_PAGE_HISTORY_BUFFER_SIZE)
 	{
 		size_t firstLength = strlen(pageHistoryBuffer);
-
 		if (!firstLength)
 		{
 			// This shouldn't happen
 			pageHistoryPtr = pageHistoryBuffer;
 			break;
 		}
-
 		memmove(pageHistoryBuffer, pageHistoryBuffer + firstLength + 1, MAX_PAGE_HISTORY_BUFFER_SIZE - firstLength - 1);
 		pageHistoryPtr -= firstLength + 1;
 	}
-
 	strcpy(pageHistoryPtr, url);
 	memset(pageHistoryPtr + urlStringLength, 0, MAX_PAGE_HISTORY_BUFFER_SIZE - (pageHistoryPtr + urlStringLength - pageHistoryBuffer));
 }
 
 void App::StopLoad()
 {
+	SetBulkTransferActive(false);
 	pageLoadTask.Stop();
 	pageContentLoadTask.Stop();
+}
+
+void App::FinishFileDownload()
+{
+	if (!pageLoadTask.downloadFile)
+	{
+		return;
+	}
+
+	char downloadResult[96];
+	long downloadedBytes = pageLoadTask.GetBytesDownloaded();
+	clock_t now = clock();
+	clock_t startTicks = bulkTransferFirstByteTime ? bulkTransferFirstByteTime : bulkTransferStartTime;
+	clock_t downloadTicks = startTicks ? (now - startTicks) : 0;
+	FormatDownloadResult(downloadResult, sizeof(downloadResult), downloadedBytes, downloadTicks);
+	if (config.networkStats)
+	{
+		long elapsedMs = ((long)downloadTicks * 1000L) / CLOCKS_PER_SEC;
+		NetworkStatsLog("complete bytes=%ld ticks=%ld ms=%ld", downloadedBytes, (long)downloadTicks, elapsedMs);
+	}
+
+	SetBulkTransferActive(false);
+	FILE* completedFile = pageLoadTask.downloadFile;
+	pageLoadTask.downloadFile = NULL;
+	fclose(completedFile);
+	pageLoadTask.Stop();
+	ShowDownloadEndedPage(downloadResult);
+}
+
+void App::SetBulkTransferActive(bool active)
+{
+	if (bulkTransferActive == active)
+	{
+		return;
+	}
+	bulkTransferActive = active;
+	if (active)
+	{
+		bulkTransferStartTime = clock();
+		bulkTransferFirstByteTime = 0;
+		bulkTransferLastStatsTime = bulkTransferStartTime;
+		bulkTransferLastStatsBytes = pageLoadTask.GetBytesDownloaded();
+		bulkTransferReadCalls = 0;
+		bulkTransferZeroReads = 0;
+		bulkTransferPumpCalls = 0;
+		if (config.networkStats)
+		{
+			NetworkStatsLog("begin bytes=%ld bulkpump=%lu", bulkTransferLastStatsBytes, config.bulkPumpBytes);
+		}
+	}
+	else
+	{
+		MaybeLogBulkTransferStats(true);
+		if (config.networkStats)
+		{
+			NetworkStatsLog("end bytes=%ld", pageLoadTask.GetBytesDownloaded());
+		}
+	}
+	if (Platform::network)
+	{
+		Platform::network->SetBulkTransferMode(active);
+	}
+}
+
+void App::PumpBulkTransfer()
+{
+	if (Platform::network)
+	{
+		Platform::network->Update();
+		bulkTransferPumpCalls++;
+	}
+}
+
+void App::LogZeroReadNetStats(const char* name, LoadTask& task, clock_t& lastLogTime, bool includeTarget)
+{
+	if (!config.networkStats)
+	{
+		return;
+	}
+
+	clock_t now = clock();
+	if ((now - lastLogTime) < (CLOCKS_PER_SEC / 2))
+	{
+		return;
+	}
+
+	const char* status = "local";
+	if (task.type == LoadTask::RemoteFile && task.request)
+	{
+		status = task.request->GetStatusString();
+	}
+
+	if (includeTarget)
+	{
+		NetworkStatsLog("read-zero task=%s ticks=%ld bytes=%ld status=\"%s\" target=%p",
+			name, (long)now, task.GetBytesDownloaded(), status, loadTaskTargetNode);
+	}
+	else
+	{
+		NetworkStatsLog("read-zero task=%s ticks=%ld bytes=%ld status=\"%s\"",
+			name, (long)now, task.GetBytesDownloaded(), status);
+	}
+	lastLogTime = now;
+}
+
+void App::HandleEmptyRead(const char* name, LoadTask& task, clock_t& lastLogTime, bool includeTarget)
+{
+	if (!task.HasContent() || task.IsDownloadComplete())
+	{
+		return;
+	}
+
+	if (task.downloadFile)
+	{
+		bulkTransferZeroReads++;
+		return;
+	}
+
+	if (Platform::network)
+	{
+		Platform::network->UpdateIdle();
+	}
+	LogZeroReadNetStats(name, task, lastLogTime, includeTarget);
+}
+
+void App::UpdateIdleNetwork()
+{
+	if (config.legacyNetworkPump || !Platform::network)
+	{
+		return;
+	}
+
+	if ((pageLoadTask.NeedsNetworkIdle() || pageContentLoadTask.NeedsNetworkIdle()) && !pageRenderer.IsRendering())
+	{
+		Platform::network->UpdateIdle();
+		return;
+	}
+
+	if (!pageLoadTask.IsBusy() && !pageContentLoadTask.IsBusy()
+		&& parser.IsFinished() && page.layout.IsFinished() && !pageRenderer.IsRendering())
+	{
+		Platform::network->UpdateIdle();
+	}
+}
+
+void App::MaybeLogBulkTransferStats(bool force)
+{
+	if (!config.networkStats)
+	{
+		return;
+	}
+
+	clock_t now = clock();
+	clock_t sampleTicks = now - bulkTransferLastStatsTime;
+	if (!force && sampleTicks < (CLOCKS_PER_SEC / 2))
+	{
+		return;
+	}
+
+	long totalBytes = pageLoadTask.GetBytesDownloaded();
+	long sampleBytes = totalBytes - bulkTransferLastStatsBytes;
+	long elapsedMs = 0;
+	long sampleMs = 0;
+	if (CLOCKS_PER_SEC)
+	{
+		elapsedMs = ((long)(now - bulkTransferStartTime) * 1000L) / CLOCKS_PER_SEC;
+		sampleMs = ((long)sampleTicks * 1000L) / CLOCKS_PER_SEC;
+	}
+	NetworkStatsLog("download ticks=%ld ms=%ld sampleTicks=%ld sampleMs=%ld bytes=%ld sample=%ld reads=%lu zero=%lu pumps=%lu bulkpump=%lu",
+		(long)(now - bulkTransferStartTime), elapsedMs, (long)sampleTicks, sampleMs, totalBytes, sampleBytes,
+		bulkTransferReadCalls, bulkTransferZeroReads, bulkTransferPumpCalls, config.bulkPumpBytes);
+
+	bulkTransferLastStatsTime = now;
+	bulkTransferLastStatsBytes = totalBytes;
+	bulkTransferReadCalls = 0;
+	bulkTransferZeroReads = 0;
+	bulkTransferPumpCalls = 0;
+}
+
+void App::LogLoadTaskNetStats(const char* name, LoadTask& task, bool force)
+{
+	if (!config.networkStats)
+	{
+		return;
+	}
+
+	int* lastStatus = &pageLoadStatsStatus;
+	char* lastText = pageLoadStatsText;
+	long* lastBytes = &pageLoadStatsBytes;
+	clock_t* lastTime = &pageLoadStatsTime;
+	if (&task == &pageContentLoadTask)
+	{
+		lastStatus = &pageContentStatsStatus;
+		lastText = pageContentStatsText;
+		lastBytes = &pageContentStatsBytes;
+		lastTime = &pageContentStatsTime;
+	}
+
+	int status = -1;
+	const char* statusText = "local";
+	const char* url = task.GetURL();
+	if (task.type == LoadTask::RemoteFile)
+	{
+		if (task.request)
+		{
+			status = (int)task.request->GetStatus();
+			statusText = task.request->GetStatusString();
+			url = task.request->GetURL();
+		}
+		else
+		{
+			statusText = "no-request";
+		}
+	}
+	else if (!task.fs)
+	{
+		statusText = "idle";
+	}
+
+	long bytes = task.GetBytesDownloaded();
+	clock_t now = clock();
+	bool changed = status != *lastStatus || strcmp(statusText, lastText);
+	bool progressed = bytes != *lastBytes;
+	if (!force && !changed && (!progressed || (now - *lastTime) < (CLOCKS_PER_SEC / 2)))
+	{
+		return;
+	}
+
+	NetworkStatsLog("task %s ticks=%ld status=%d text=\"%s\" bytes=%ld size=%ld has=%d busy=%d done=%d requested=%d target=%p url=\"%.96s\"",
+		name, (long)now, status, statusText, bytes, task.GetContentSize(), task.HasContent(), task.IsBusy(),
+		task.IsDownloadComplete(), requestedNewPage, loadTaskTargetNode, url ? url : "");
+
+	*lastStatus = status;
+	strncpy(lastText, statusText, 47);
+	lastText[47] = '\0';
+	*lastBytes = bytes;
+	*lastTime = now;
+}
+
+void App::MaybeLogLoopNetStats(bool force)
+{
+	if (!config.networkStats)
+	{
+		return;
+	}
+
+	clock_t now = clock();
+	if (!force && (now - loopStatsTime) < (CLOCKS_PER_SEC / 2))
+	{
+		return;
+	}
+	loopStatsTime = now;
+	NetworkStatsLog("loop ticks=%ld pageBusy=%d pageHas=%d contentBusy=%d contentHas=%d requested=%d parserFinished=%d layoutFinished=%d rendering=%d target=%p bulk=%d",
+		(long)now, pageLoadTask.IsBusy(), pageLoadTask.HasContent(), pageContentLoadTask.IsBusy(),
+		pageContentLoadTask.HasContent(), requestedNewPage, parser.IsFinished(), page.layout.IsFinished(),
+		pageRenderer.IsRendering(), loadTaskTargetNode, bulkTransferActive);
 }
 
 void App::ShowErrorPage(const char* message)
 {
 	StopLoad();
 	ResetPage();
-
 	page.SetTitle("Error");
-
 	page.pageURL = pageLoadTask.GetURL();
 	ui.UpdateAddressBar(page.pageURL);
-
 	parser.Write("<html>");
 	parser.Write("<h1>Error loading page</h1>");
 	parser.Write("<hr>");
@@ -858,16 +1306,12 @@ static const char* frogFindURL = "http://frogfind.com/read.php?a=";
 void App::ShowNoHTTPSPage()
 {
 	ResetPage();
-
 	page.SetTitle("HTTPS unsupported");
 	page.pageURL = pageLoadTask.GetURL();
 	ui.UpdateAddressBar(page.pageURL);
-
 	StopLoad();
-
 	page.pageURL = frogFindURL;
 	strncpy(page.pageURL.url + FROG_FIND_URL_LENGTH, pageLoadTask.GetURL(), MAX_URL_LENGTH - FROG_FIND_URL_LENGTH);
-
 	parser.Write("<html>");
 	parser.Write("<h1>HTTPS unsupported</h1>");
 	parser.Write("<hr>");
@@ -887,7 +1331,6 @@ void App::PreviousPage()
 		{
 			pageHistoryPtr--;
 		} while (pageHistoryPtr > pageHistoryBuffer && pageHistoryPtr[-1]);
-
 		RequestNewPage(HTTPRequest::Get, pageHistoryPtr);
 	}
 }
@@ -924,7 +1367,6 @@ void VideoDriver::InvertVideoOutput()
 	if (drawSurface->format == DrawSurface::Format_1BPP)
 	{
 		App::config.invertScreen = !App::config.invertScreen;
-
 		DrawContext context(drawSurface, 0, 0, screenWidth, screenHeight);
 		Platform::input->HideMouse();
 		context.surface->InvertRect(context, 0, 0, screenWidth, screenHeight);
@@ -946,7 +1388,6 @@ void App::ShowDownloadProgressPage(const char* savePath)
 	parser.Write("<input type=\"button\" value=\"Cancel\"/>");
 	parser.Write("</form>");
 	parser.Write("</center></body></html>");
-
 	parser.Finish();
 }
 
@@ -956,7 +1397,6 @@ void App::ShowDownloadEndedPage(const char* message)
 	parser.Write("<html><body><center><h1>");
 	parser.Write(message);
 	parser.Write("</h1></center></body></html>");
-
 	parser.Finish();
 }
 
@@ -964,14 +1404,12 @@ void App::ShowDownloadDialogPage()
 {
 	char temp[32];
 	char filename[14];
-
 	parser.Write("<html><body><center>");
 	parser.Write("<h1>Do you want to download this file?</h1>");
 	parser.Write("<hr>");
 	parser.Write(pageLoadTask.url.url);
 	parser.Write("<br><b>Content type: ");
 	parser.Write(pageLoadTask.GetContentType());
-
 	long contentSize = pageLoadTask.request->GetContentSize();
 	if (contentSize != 0)
 	{
@@ -991,17 +1429,13 @@ void App::ShowDownloadDialogPage()
 		}
 		parser.Write(temp);
 	}
-
 	const char* srcFilename = pageLoadTask.url.url;
 	const char* ptr;
-
 	while (ptr = strchr(srcFilename, '/'))
 	{
 		srcFilename = ptr + 1;
 	}
-
 	int filenameLength = 0;
-
 	for (int n = 0; n < 8; n++)
 	{
 		if (srcFilename[n] == '\0' || srcFilename[n] == '.')
@@ -1011,7 +1445,6 @@ void App::ShowDownloadDialogPage()
 		filename[n] = srcFilename[n];
 		filenameLength++;
 	}
-
 	if (ptr = strchr(srcFilename, '.'))
 	{
 		for (int n = 0; n < 4; n++)
@@ -1019,13 +1452,10 @@ void App::ShowDownloadDialogPage()
 			filename[filenameLength++] = ptr[n];
 		}
 	}
-
 	filename[filenameLength] = '\0';
-
 	parser.Write("</b><hr>");
 	parser.Write("<form action=\"download://\">");
 	parser.Write("<input name=\"path\" type=\"text\" width=\"75%\" value=\"");
-
 	char currentDirectory[PATH_MAX + 1];
 	if (getcwd(currentDirectory, (PATH_MAX + 1)) == NULL)
 	{
@@ -1042,13 +1472,11 @@ void App::ShowDownloadDialogPage()
 		}
 		parser.Write(filename);
 	}
-
 	parser.Write("\"/><br>");
 	parser.Write("<br>");
 	parser.Write("<input type=\"button\" value=\"Download\"/>");
 	parser.Write("</form>");
 	parser.Write("</center></body></html>");
-
 	parser.Finish();
 }
 
@@ -1061,6 +1489,7 @@ void App::BeginFileDownload(const char* savePath)
 		pageLoadTask.Load(HTTPRequest::Get, pageLoadTask.url.url);
 		requestedNewPage = true;
 		pageLoadTask.downloadFile = downloadFile;
+		SetBulkTransferActive(true);
 		ui.SetStatusMessage("Connecting to server...", StatusBarNode::GeneralStatus);
 	}
 }
