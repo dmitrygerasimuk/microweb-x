@@ -10,6 +10,60 @@
 #include "../HTTP.h"
 #include "Text.h"
 
+static bool CanReuseImageState(ImageNode::Data* data)
+{
+	return data->state == ImageNode::FinishedDownloadingDimensions
+		|| data->state == ImageNode::FinishedDownloadingContent;
+}
+
+static bool TryReuseImageContent(Node* node)
+{
+	ImageNode::Data* data = static_cast<ImageNode::Data*>(node);
+	if (!data || !data->source)
+	{
+		return false;
+	}
+
+	Node* root = App::Get().page.GetRootNode();
+	for (Node* n = root; n; n = n->GetNextInTree())
+	{
+		if (n == node || n->type != Node::Image)
+		{
+			continue;
+		}
+
+		ImageNode::Data* otherData = static_cast<ImageNode::Data*>(n);
+		if (!otherData->source || strcmp(data->source, otherData->source))
+		{
+			continue;
+		}
+
+		if (!CanReuseImageState(otherData))
+		{
+			continue;
+		}
+		if (data->HasDimensions() && otherData->state != ImageNode::FinishedDownloadingContent)
+		{
+			continue;
+		}
+		if (data->HasDimensions() && otherData->HasDimensions()
+			&& (data->image.width != otherData->image.width || data->image.height != otherData->image.height))
+		{
+			continue;
+		}
+
+		data->image = otherData->image;
+		data->state = otherData->state;
+		if (data->state == ImageNode::FinishedDownloadingContent)
+		{
+			App::Get().pageRenderer.MarkNodeDirty(node);
+		}
+		return true;
+	}
+
+	return false;
+}
+
 void ImageNode::Draw(DrawContext& context, Node* node)
 {
 	ImageNode::Data* data = static_cast<ImageNode::Data*>(node);
@@ -135,6 +189,11 @@ void ImageNode::LoadContent(Node* node, LoadTask& loadTask)
 	ImageNode::Data* data = static_cast<ImageNode::Data*>(node);
 	if (data && data->state != ImageNode::ErrorDownloading && data->state != ImageNode::FinishedDownloadingContent) 
 	{
+		if (TryReuseImageContent(node))
+		{
+			return;
+		}
+
 		if (data->HasDimensions() && !App::Get().page.layout.IsFinished())
 		{
 			return;

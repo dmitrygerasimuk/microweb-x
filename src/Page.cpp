@@ -243,7 +243,10 @@ Node* Page::ProcessNextLoadTask(Node* lastNode, LoadTask& loadTask)
 		if (node && node->type == Node::Image)
 		{
 			node->Handler().LoadContent(node, loadTask);
-			return node;
+			if (loadTask.IsBusy())
+			{
+				return node;
+			}
 		}
 	}
 
